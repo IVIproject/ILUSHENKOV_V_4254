@@ -6,9 +6,19 @@ class GenerateRequest(BaseModel):
  
 class GenerateResponse(BaseModel):
     answer: str
+
+
+class ErrorResponse(BaseModel):
+    detail: str
  
 class HistoryItem(BaseModel):
     id: int
     prompt: str
     answer: str
     created_at: datetime
+
+
+class StreamChunk(BaseModel):
+    chunk: str
+    done: bool = False
+    error: str | None = None
