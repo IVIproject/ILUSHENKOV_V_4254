@@ -65,7 +65,7 @@ curl -X POST "http://127.0.0.1:8080/generate" \
 ```bash
 curl -X POST "http://127.0.0.1:8080/generate/domains" \
   -H "Content-Type: application/json" \
-  -d '{"company":"cloud hosting and VPS","keywords":["cloud","vps"],"zone":".ru","count":7}'
+  -d '{"business_context":"cloud hosting and VPS","keywords":["cloud","vps"],"zone":".ru","count":7}'
 ```
 
 - Stream generation (NDJSON):
@@ -137,3 +137,28 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 - architecture description: `docs/architecture.md`
 - demonstration script: `docs/defense-scenario.md`
+- experiment methodology: `docs/experiment-methodology.md`
+
+## Experimental part (for report)
+
+Run quick API benchmark and save measurable metrics:
+
+```bash
+make benchmark
+```
+
+This command creates JSON report:
+
+- `docs/results/benchmark-generate.json`
+
+You can include these values directly into report tables (latency avg/p95/p99, status code distribution, payload size).
+
+Example for domain generation scenario:
+
+```bash
+python3 scripts/benchmark_api.py \
+  --url http://127.0.0.1:8080/generate/domains \
+  --requests 20 \
+  --warmup 3 \
+  --out docs/results/benchmark-domains.json
+```
