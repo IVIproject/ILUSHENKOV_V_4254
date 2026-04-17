@@ -4,50 +4,46 @@ Local API service for text generation using FastAPI + Ollama + PostgreSQL.
 
 ## Prerequisites
 
-- Python 3.10+
 - Docker + Docker Compose
-- Running Ollama server with a downloaded model
+- Running Ollama server with a downloaded model (local or remote)
 
-## Quick start
+## Quick start (Docker: API + Postgres + Nginx)
 
-1. Start PostgreSQL:
-
-```bash
-docker compose up -d
-```
-
-2. Prepare environment file:
+1. Prepare environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-3. Create and activate virtual environment:
+2. Start stack:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+docker compose up -d --build
 ```
 
-4. Run API:
+3. Check containers:
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+docker compose ps
 ```
+
+API is available through Nginx at:
+
+- `http://127.0.0.1`
+- Swagger: `http://127.0.0.1/docs`
 
 ## API checks
 
 - Health check:
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1/health
 ```
 
 - Generate text:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/generate" \
+curl -X POST "http://127.0.0.1/generate" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Suggest 3 domain names for an IT service"}'
 ```
@@ -55,7 +51,7 @@ curl -X POST "http://127.0.0.1:8000/generate" \
 - Stream generation (NDJSON):
 
 ```bash
-curl -N -X POST "http://127.0.0.1:8000/generate/stream" \
+curl -N -X POST "http://127.0.0.1/generate/stream" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Write a short greeting"}'
 ```
@@ -63,19 +59,31 @@ curl -N -X POST "http://127.0.0.1:8000/generate/stream" \
 - Request history:
 
 ```bash
-curl "http://127.0.0.1:8000/history?limit=5"
+curl "http://127.0.0.1/history?limit=5"
 ```
 
 ## Migrations (Alembic)
 
-- Apply migrations:
+From local virtual environment:
 
 ```bash
 alembic upgrade head
 ```
 
-- Create new migration:
+Create new migration:
 
 ```bash
 alembic revision -m "describe_change"
+```
+
+## Local development (without API container)
+
+If you want to run only PostgreSQL in Docker and run API from venv:
+
+```bash
+docker compose up -d postgres
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```

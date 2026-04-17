@@ -4,18 +4,50 @@ services:
     container_name: ai-servise-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ai_servise_db
-      POSTGRES_USER: ai_servise_user
-      POSTGRES_PASSWORD: ai_servise_pass
+      POSTGRES_DB: ${POSTGRES_DB:-ai_servise_db}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_servise_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_servise_pass}
     ports:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ai_servise_user -d ai_servise_db"]
+      test: [
+        "CMD-SHELL",
+        "pg_isready -U ${POSTGRES_USER:-ai_servise_user} -d ${POSTGRES_DB:-ai_servise_db}"
+      ]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-servise-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_servise_user}:${POSTGRES_PASSWORD:-ai_servise_pass}@postgres:5432/${POSTGRES_DB:-ai_servise_db}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ai-servise-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
  
 volumes:
   pg_data:
