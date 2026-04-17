@@ -1,6 +1,6 @@
 import os
 
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
+os.environ["DATABASE_URL"] = "sqlite:////tmp/ai_servise_test.db"
 os.environ["OLLAMA_HOST"] = "http://fake-ollama"
 os.environ["OLLAMA_MODEL"] = "qwen2.5:3b"
 
