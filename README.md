@@ -76,6 +76,15 @@ Create new migration:
 alembic revision -m "describe_change"
 ```
 
+## Optional ML dependencies
+
+The API does not require `torch` / `transformers` for basic Ollama proxy mode.
+If you want local model experimentation with Hugging Face stack, install separately:
+
+```bash
+pip install -r requirements-ml.txt
+```
+
 ## Local development (without API container)
 
 If you want to run only PostgreSQL in Docker and run API from venv:
