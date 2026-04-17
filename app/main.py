@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -115,14 +116,20 @@ def history(limit: int = Query(10, ge=1, le=100)):
 @app.get("/stats", response_model=StatsResponse)
 def stats():
     try:
+        day_ago = datetime.now(timezone.utc) - timedelta(days=1)
         with SessionLocal() as db:
             total_requests = db.query(func.count(RequestLog.id)).scalar() or 0
             avg_prompt_length = db.query(func.avg(func.length(RequestLog.prompt))).scalar()
             avg_answer_length = db.query(func.avg(func.length(RequestLog.answer))).scalar()
-            day_ago = func.datetime("now", "-1 day")
             requests_last_24h = (
                 db.query(func.count(RequestLog.id))
                 .filter(RequestLog.created_at >= day_ago)
+                .scalar()
+            )
+            latest = (
+                db.query(RequestLog.created_at)
+                .order_by(RequestLog.created_at.desc())
+                .limit(1)
                 .scalar()
             )
         return StatsResponse(
@@ -130,6 +137,7 @@ def stats():
             requests_last_24h=int(requests_last_24h or 0),
             average_prompt_length=float(avg_prompt_length or 0.0),
             average_answer_length=float(avg_answer_length or 0.0),
+            latest_request_at=latest,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stats error: {e}")
