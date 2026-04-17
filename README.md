@@ -1,32 +1,89 @@
 # ai-servise
- 
-Локальный API-сервис генерации текста на FastAPI + Ollama + PostgreSQL.
- 
-## Запуск
- 
-1. Поднять PostgreSQL:
+
+Local API service for text generation using FastAPI + Ollama + PostgreSQL.
+
+## Prerequisites
+
+- Docker + Docker Compose
+- Running Ollama server with a downloaded model (local or remote)
+
+## Quick start (Docker: API + Postgres + Nginx)
+
+1. Prepare environment file:
+
 ```bash
-docker compose up -d
-Создать .env:
-
 cp .env.example .env
-Установить зависимости:
+```
 
+2. Start stack:
+
+```bash
+docker compose up -d --build
+```
+
+3. Check containers:
+
+```bash
+docker compose ps
+```
+
+API is available through Nginx at:
+
+- `http://127.0.0.1`
+- Swagger: `http://127.0.0.1/docs`
+
+## API checks
+
+- Health check:
+
+```bash
+curl http://127.0.0.1/health
+```
+
+- Generate text:
+
+```bash
+curl -X POST "http://127.0.0.1/generate" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Suggest 3 domain names for an IT service"}'
+```
+
+- Stream generation (NDJSON):
+
+```bash
+curl -N -X POST "http://127.0.0.1/generate/stream" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Write a short greeting"}'
+```
+
+- Request history:
+
+```bash
+curl "http://127.0.0.1/history?limit=5"
+```
+
+## Migrations (Alembic)
+
+From local virtual environment:
+
+```bash
+alembic upgrade head
+```
+
+Create new migration:
+
+```bash
+alembic revision -m "describe_change"
+```
+
+## Local development (without API container)
+
+If you want to run only PostgreSQL in Docker and run API from venv:
+
+```bash
+docker compose up -d postgres
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-Запуск API:
-
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-Проверка
-Health:
-
-curl http://127.0.0.1:8000/health
-Генерация (POST):
-
-curl -X POST "http://127.0.0.1:8000/generate" \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Привет, предложи 3 доменных имени для IT-сервиса"}'
-История:
-
-curl "http://127.0.0.1:8000/history?limit=5"
+```
