@@ -14,6 +14,13 @@ class FakeClient:
         return {"models": [{"name": "qwen2.5:3b"}]}
 
     def chat(self, model, messages, stream=False):
+        text = messages[0]["content"]
+        if "Верни только список по одному домену в строке." in text:
+            return {
+                "message": {
+                    "content": "cloudhost.ru\nfastvps.ru\nsecurezone.ru\n"
+                }
+            }
         if stream:
             def _iter():
                 yield {"message": {"content": "part1 "}}
@@ -21,7 +28,7 @@ class FakeClient:
 
             return _iter()
 
-        return {"message": {"content": f"fake answer for: {messages[0]['content']}"}}
+        return {"message": {"content": f"fake answer for: {text}"}}
 
 main_module.client = FakeClient()
 Base.metadata.create_all(bind=engine)
@@ -53,3 +60,31 @@ def test_generate_stream():
     lines = [line for line in r.text.splitlines() if line.strip()]
     assert len(lines) >= 1
     assert '"chunk":"part1 "' in lines[0]
+
+
+def test_generate_domains():
+    r = client.post(
+        "/generate/domains",
+        json={
+            "business_context": "My Hosting Service",
+            "keywords": ["cloud", "fast", "secure"],
+            "zone": ".ru",
+            "count": 3,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["zone"] == ".ru"
+    assert data["business_context"] == "My Hosting Service"
+    assert len(data["suggestions"]) == 3
+    assert all(item.endswith(".ru") for item in data["suggestions"])
+
+
+def test_stats():
+    client.post("/generate", json={"prompt": "stats seed"})
+    r = client.get("/stats")
+    assert r.status_code == 200
+    data = r.json()
+    assert "total_requests" in data
+    assert data["total_requests"] >= 1
+    assert "requests_last_24h" in data
