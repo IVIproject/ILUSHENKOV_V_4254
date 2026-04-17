@@ -2,6 +2,18 @@
 
 Local API service for text generation using FastAPI + Ollama + PostgreSQL.
 
+## Project readiness level
+
+The service already includes:
+
+- API layer (FastAPI) with OpenAPI docs
+- local LLM integration via Ollama
+- PostgreSQL logging of requests/responses
+- streaming generation endpoint
+- migration support via Alembic
+- Docker stack (api + postgres + nginx)
+- tests for core endpoints
+
 ## Prerequisites
 
 - Docker + Docker Compose
@@ -29,29 +41,37 @@ docker compose ps
 
 API is available through Nginx at:
 
-- `http://127.0.0.1`
-- Swagger: `http://127.0.0.1/docs`
+- `http://127.0.0.1:8080`
+- Swagger: `http://127.0.0.1:8080/docs`
 
 ## API checks
 
 - Health check:
 
 ```bash
-curl http://127.0.0.1/health
+curl http://127.0.0.1:8080/health
 ```
 
-- Generate text:
+- Generic text generation:
 
 ```bash
-curl -X POST "http://127.0.0.1/generate" \
+curl -X POST "http://127.0.0.1:8080/generate" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Suggest 3 domain names for an IT service"}'
+```
+
+- Domain names generation (business endpoint):
+
+```bash
+curl -X POST "http://127.0.0.1:8080/generate/domains" \
+  -H "Content-Type: application/json" \
+  -d '{"company":"cloud hosting and VPS","keywords":["cloud","vps"],"zone":".ru","count":7}'
 ```
 
 - Stream generation (NDJSON):
 
 ```bash
-curl -N -X POST "http://127.0.0.1/generate/stream" \
+curl -N -X POST "http://127.0.0.1:8080/generate/stream" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Write a short greeting"}'
 ```
@@ -59,7 +79,13 @@ curl -N -X POST "http://127.0.0.1/generate/stream" \
 - Request history:
 
 ```bash
-curl "http://127.0.0.1/history?limit=5"
+curl "http://127.0.0.1:8080/history?limit=5"
+```
+
+- Service usage stats:
+
+```bash
+curl "http://127.0.0.1:8080/stats"
 ```
 
 ## Migrations (Alembic)
@@ -74,6 +100,16 @@ Create new migration:
 
 ```bash
 alembic revision -m "describe_change"
+```
+
+## Makefile shortcuts
+
+```bash
+make up
+make ps
+make test
+make logs
+make down
 ```
 
 ## Optional ML dependencies
@@ -96,3 +132,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+## Documentation for report and defense
+
+- architecture description: `docs/architecture.md`
+- demonstration script: `docs/defense-scenario.md`
