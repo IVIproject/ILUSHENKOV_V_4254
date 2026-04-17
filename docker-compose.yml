@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ai-servise-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_servise_db
+      POSTGRES_USER: ai_servise_user
+      POSTGRES_PASSWORD: ai_servise_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_servise_user -d ai_servise_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+ 
+volumes:
+  pg_data:

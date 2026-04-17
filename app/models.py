@@ -1,0 +1,11 @@
+from sqlalchemy import DateTime, Integer, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+from .db import Base
+ 
+class RequestLog(Base):
+    __tablename__ = "request_logs"
+ 
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
