@@ -125,8 +125,6 @@ class GatewayUserResponse(BaseModel):
     email: str
     api_key: str
     role: str = "user"
-    token_balance: int
-    tariff_code: str
     is_active: bool = True
 
 
@@ -134,25 +132,8 @@ class GatewayMeResponse(BaseModel):
     user_id: int
     email: str
     role: str
-    tariff_code: str
-    token_balance: int
     is_active: bool
     created_at: datetime
-
-
-class GatewayTopUpRequest(BaseModel):
-    tokens: int = Field(..., ge=1, le=5_000_000)
-
-
-class GatewayTopUpResponse(BaseModel):
-    user_id: int
-    token_balance: int
-
-
-class GatewayBalanceResponse(BaseModel):
-    user_id: int
-    token_balance: int
-    tariff_code: str
 
 
 class GatewayUsageLogItem(BaseModel):
@@ -172,29 +153,10 @@ class GatewayUsageLogsResponse(BaseModel):
     items: list[GatewayUsageLogItem]
 
 
-class GatewayBalanceAuditItem(BaseModel):
-    id: int
-    user_id: int
-    action: str
-    delta_tokens: int
-    balance_before: int
-    balance_after: int
-    actor: str
-    actor_reference: str | None = None
-    reason: str | None = None
-    created_at: datetime
-
-
-class GatewayBalanceAuditResponse(BaseModel):
-    items: list[GatewayBalanceAuditItem]
-
-
 class GatewayAdminUserItem(BaseModel):
     user_id: int
     email: str
     role: str
-    tariff_code: str
-    token_balance: int
     is_active: bool
     created_at: datetime
     total_requests: int
@@ -210,10 +172,6 @@ class GatewayAdminUsersResponse(BaseModel):
 class GatewayAdminUserUpdateRequest(BaseModel):
     email: str | None = Field(default=None, min_length=5, max_length=255)
     role: str | None = Field(default=None, min_length=4, max_length=16)
-    tariff_code: str | None = Field(default=None, min_length=3, max_length=64)
-    set_balance_tokens: int | None = Field(default=None, ge=0, le=50_000_000)
-    add_tokens: int | None = Field(default=None, ge=-5_000_000, le=5_000_000)
-    balance_reason: str | None = Field(default=None, min_length=2, max_length=255)
     is_active: bool | None = None
     regenerate_api_key: bool = False
 
@@ -227,22 +185,6 @@ class GatewayModelItem(BaseModel):
     external_price_per_1k_tokens: float | None = None
     markup_percent: float = 0.0
     is_active: bool
-
-
-class GatewayEstimateCostRequest(BaseModel):
-    model_id: str = Field(..., min_length=3, max_length=128)
-    prompt: str = Field(..., min_length=1, max_length=10_000)
-
-
-class GatewayEstimateCostResponse(BaseModel):
-    model_id: str
-    provider: str
-    estimated_prompt_tokens: int
-    estimated_response_tokens: int
-    estimated_total_tokens: int
-    estimated_tokens_to_charge: int
-    price_per_1k_tokens: float
-    balance_after_estimate: int
 
 
 class GatewayAdminModelUpdateRequest(BaseModel):
@@ -282,21 +224,6 @@ class GatewayChatRequest(BaseModel):
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
 
 
-class GatewayUsageInfo(BaseModel):
-    estimated_input_tokens: int
-    estimated_output_tokens: int
-    charged_tokens: int
-    balance_before: int
-    balance_after: int
-
-
-class GatewayChatResponse(BaseModel):
-    provider: str
-    model: str
-    content: str
-    usage: GatewayUsageInfo
-
-
 class GatewayGenerateRequest(BaseModel):
     model_id: str = Field(..., min_length=3, max_length=128)
     prompt: str = Field(..., min_length=1, max_length=10_000)
@@ -312,7 +239,6 @@ class GatewayGenerateResponse(BaseModel):
     completion_tokens: int
     total_tokens: int
     tokens_spent: int
-    token_balance: int
 
 
 class OpenAIModelCard(BaseModel):

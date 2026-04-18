@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>История запросов</title>
+  <title>AI Gateway — История запросов</title>
   <style>
     body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
     .container { max-width: 980px; margin: 0 auto; padding: 24px 16px 56px; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 14px; }
-    .nav a { color: #cbd5e1; text-decoration: none; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; background: #0b1220; }
+    .nav a, .nav button {
+      color: #cbd5e1; text-decoration: none; border: 1px solid #334155; border-radius: 8px;
+      padding: 8px 12px; background: #0b1220; font-size: 14px; cursor: pointer;
+    }
     .nav a.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
     input, button { width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px 12px; margin-top: 6px; margin-bottom: 10px; }
     button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
@@ -21,22 +24,30 @@
   <div class="container">
     <h1>История запросов</h1>
     <p class="small">Показывает историю запросов текущего пользователя.</p>
-    <div class="nav">
+
+    <nav class="nav">
+      <a href="/gateway/register">Регистрация</a>
+      <a href="/gateway/login">Авторизация</a>
       <a href="/gateway/profile">Профиль</a>
       <a href="/gateway/models/page">Модели</a>
-      <a href="/gateway/finance">Финансы</a>
       <a href="/gateway/history" class="active">История</a>
-    </div>
+      <a id="adminLink" href="/gateway/admin" style="display:none;">Управление</a>
+      <button id="logoutBtn" type="button">Выйти</button>
+    </nav>
+
     <section class="card">
-      <label>Лимит</label>
+      <label for="usageLimit">Лимит</label>
       <input id="usageLimit" type="number" min="1" max="200" value="30" />
-      <button id="loadBtn">Поиск</button>
+      <button id="loadBtn" type="button">Поиск</button>
       <pre id="out"></pre>
     </section>
   </div>
   <script>
     const API_KEY_STORAGE = "gateway_api_key";
+    const USER_ROLE_STORAGE = "gateway_user_role";
     function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ""; }
+    function getRole() { return localStorage.getItem(USER_ROLE_STORAGE) || ""; }
+    function updateNav() { document.getElementById("adminLink").style.display = getRole() === "admin" ? "inline-block" : "none"; }
     function setText(id, value) { document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); }
     async function parseResponse(response) {
       const raw = await response.text();
@@ -63,8 +74,19 @@
         setText("out", String(error));
       }
     }
+    function logout() {
+      localStorage.removeItem(API_KEY_STORAGE);
+      localStorage.removeItem(USER_ROLE_STORAGE);
+      window.location.href = "/gateway/login";
+    }
     document.getElementById("loadBtn").addEventListener("click", loadUsage);
-    if (!getApiKey()) { window.location.href = "/gateway/login"; } else { loadUsage(); }
+    document.getElementById("logoutBtn").addEventListener("click", logout);
+    if (!getApiKey()) {
+      window.location.href = "/gateway/login";
+    } else {
+      updateNav();
+      loadUsage();
+    }
   </script>
 </body>
 </html>

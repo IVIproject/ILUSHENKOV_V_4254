@@ -3,54 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Админ: модели и цены</title>
+  <title>AI Gateway — Управление моделями</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
     .container { max-width: 1080px; margin: 0 auto; padding: 24px 16px 56px; }
-    .header { margin-bottom: 16px; }
     .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-    .nav a, .nav button { text-decoration: none; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; background: #111827; color: #e2e8f0; cursor: pointer; font-weight: 700; }
+    .nav a, .nav button {
+      text-decoration: none; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px;
+      background: #111827; color: #e2e8f0; cursor: pointer; font-size: 14px;
+    }
+    .nav a.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
-    h1, h2 { margin-top: 0; }
     .muted { color: #94a3b8; }
-    .warn { padding: 10px; border-radius: 8px; border: 1px solid #7c2d12; background: #1f1208; color: #fdba74; }
     pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border: 1px solid #334155; padding: 8px; text-align: left; vertical-align: top; }
     th { background: #0b1220; color: #cbd5e1; }
-    .inline-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    input[type="text"] { width: 100%; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 8px 10px; }
+    input[type="text"] { width: 100%; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 8px 10px; margin-bottom: 8px; }
     .small-btn { border: 1px solid #334155; border-radius: 8px; background: #374151; color: #fff; padding: 6px 10px; cursor: pointer; }
   </style>
 </head>
 <body>
   <div class="container">
-    <header class="header">
-      <h1>Админ: модели и ценообразование</h1>
-      <p class="muted">Упрощенный режим: управление ценой и активностью. Сложную форму добавления моделей временно убрали из UI.</p>
-    </header>
+    <h1>Управление моделями</h1>
+    <p class="muted">Редактирование цены и активности моделей.</p>
 
     <nav class="nav">
-      <a href="/gateway/admin">Назад</a>
-      <a href="/gateway/admin/users/ui">Пользователи</a>
-      <a href="/gateway/admin/finance/ui">Финансы</a>
-      <button id="logoutBtn">Выйти</button>
+      <a href="/gateway/register">Регистрация</a>
+      <a href="/gateway/login">Авторизация</a>
+      <a href="/gateway/profile">Профиль</a>
+      <a href="/gateway/models/page">Модели</a>
+      <a href="/gateway/history">История</a>
+      <a href="/gateway/admin" class="active">Управление</a>
+      <button id="logoutBtn" type="button">Выйти</button>
     </nav>
 
     <section class="card">
-      <div class="warn">
-        На этой странице не подключается внешний API автоматически по API-ключу, потому что внешние провайдеры не имеют
-        единого стандарта получения лимитов/цен через один endpoint. Поэтому сейчас оставлен безопасный ручной режим:
-        редактировать цену и активность существующих моделей.
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="inline-group">
-        <button id="loadModelsBtn">Обновить список моделей</button>
-      </div>
+      <button id="loadModelsBtn" type="button">Обновить список моделей</button>
       <div id="modelsWrap"></div>
       <pre id="out"></pre>
     </section>
@@ -60,9 +51,7 @@
     const API_KEY_STORAGE = "gateway_api_key";
 
     function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ""; }
-    function setText(id, value) {
-      document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    }
+    function setText(id, value) { document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); }
     function logout() {
       localStorage.removeItem(API_KEY_STORAGE);
       localStorage.removeItem("gateway_user_role");
@@ -99,13 +88,13 @@
           const row = document.createElement("tr");
 
           const c1 = document.createElement("td");
-          c1.innerHTML = `<div><strong>${m.display_name}</strong></div><div class="muted">${m.model_id}</div><div class="muted">Целевая модель: ${m.target_model}</div>`;
+          c1.innerHTML = `<div><strong>${m.display_name}</strong></div><div class="muted">${m.model_id}</div><div class="muted">Целевая: ${m.target_model}</div>`;
 
           const c2 = document.createElement("td");
           c2.innerHTML = `${m.provider}<br><span class="muted">${m.is_active ? "активна" : "выключена"}</span>`;
 
           const c3 = document.createElement("td");
-          c3.innerHTML = `<div>Текущая цена: <strong>${m.price_per_1k_tokens}</strong> токенов / 1k</div><div class="muted">Внешняя: ${m.external_price_per_1k_tokens ?? "не задана"}</div><div class="muted">Наценка: ${m.markup_percent ?? 0}%</div>`;
+          c3.innerHTML = `<div><strong>${m.price_per_1k_tokens}</strong> / 1k</div><div class="muted">Наценка: ${m.markup_percent ?? 0}%</div>`;
 
           const c4 = document.createElement("td");
           const price = document.createElement("input");
@@ -121,10 +110,7 @@
           saveBtn.textContent = "Сохранить";
           saveBtn.onclick = async () => {
             try {
-              const payload = {
-                price_per_1k_tokens: Number(price.value || "0"),
-                is_active: active.value === "true",
-              };
+              const payload = { price_per_1k_tokens: Number(price.value || "0"), is_active: active.value === "true" };
               const out = await apiFetch(`/gateway/admin/models/${encodeURIComponent(m.model_id)}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
@@ -137,11 +123,9 @@
             }
           };
 
-          const panel = document.createElement("div");
-          panel.appendChild(price);
-          panel.appendChild(active);
-          panel.appendChild(saveBtn);
-          c4.appendChild(panel);
+          c4.appendChild(price);
+          c4.appendChild(active);
+          c4.appendChild(saveBtn);
 
           row.appendChild(c1);
           row.appendChild(c2);
@@ -149,6 +133,7 @@
           row.appendChild(c4);
           tbody.appendChild(row);
         });
+
         wrap.appendChild(table);
       } catch (error) {
         setText("out", String(error));

@@ -11,47 +11,12 @@ from .settings import settings
 
 
 @dataclass(frozen=True)
-class TariffPlan:
-    code: str
-    name: str
-    price_rub: int
-    tokens: int
-    description: str
-
-
-@dataclass(frozen=True)
 class GatewayModelDef:
     model_id: str
     provider: str
     label: str
     upstream_model: str
     cost_per_1k_tokens: int
-
-
-def get_tariff_plans() -> list[TariffPlan]:
-    return [
-        TariffPlan(
-            code="starter",
-            name="Starter",
-            price_rub=299,
-            tokens=150_000,
-            description="For personal usage and testing integrations.",
-        ),
-        TariffPlan(
-            code="business",
-            name="Business",
-            price_rub=999,
-            tokens=700_000,
-            description="For active products and frequent API traffic.",
-        ),
-        TariffPlan(
-            code="pro",
-            name="Pro",
-            price_rub=2_499,
-            tokens=2_000_000,
-            description="For heavy production workloads and proxies.",
-        ),
-    ]
 
 
 def get_gateway_models() -> list[GatewayModelDef]:

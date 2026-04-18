@@ -3,50 +3,54 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Профиль пользователя</title>
+  <title>AI Gateway — Профиль</title>
   <style>
     :root { color-scheme: dark; }
     body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
-    .container { max-width: 980px; margin: 0 auto; padding: 26px 16px 56px; }
-    .header { margin-bottom: 14px; }
-    .muted { color: #94a3b8; }
-    .menu { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-    .menu a, .menu button {
+    .container { max-width: 980px; margin: 0 auto; padding: 24px 16px 56px; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .nav a, .nav button {
       text-decoration: none; border: 1px solid #334155; background: #0b1220; color: #e2e8f0;
       border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 14px;
     }
-    .menu a.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+    .nav a.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; }
+    .muted { color: #94a3b8; }
     pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
     button {
       margin-top: 10px; border: 0; border-radius: 8px; background: #2563eb; color: #fff;
-      padding: 10px 12px; font-weight: 700; cursor: pointer;
+      padding: 10px 12px; font-weight: 700; cursor: pointer; width: 100%;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="header">
-      <h1>Профиль пользователя</h1>
-      <p class="muted">Ваш баланс и роль в системе.</p>
-    </div>
-    <div class="menu">
+    <h1>Профиль пользователя</h1>
+    <p class="muted">Основная информация по вашему аккаунту.</p>
+
+    <nav class="nav">
+      <a href="/gateway/register">Регистрация</a>
+      <a href="/gateway/login">Авторизация</a>
       <a href="/gateway/profile" class="active">Профиль</a>
       <a href="/gateway/models/page">Модели</a>
-      <a href="/gateway/history">История запросов</a>
-      <a href="/gateway/finance">Финансовые операции</a>
-      <button id="logoutBtn">Выйти</button>
-    </div>
+      <a href="/gateway/history">История</a>
+      <a id="adminLink" href="/gateway/admin" style="display:none;">Управление</a>
+      <button id="logoutBtn" type="button">Выйти</button>
+    </nav>
+
     <section class="card">
       <h2>Информация профиля</h2>
-      <button id="refreshBtn">Обновить профиль</button>
+      <button id="refreshBtn" type="button">Обновить профиль</button>
       <pre id="profileOut"></pre>
     </section>
   </div>
   <script>
-    const KEY = "gateway_api_key";
+    const API_KEY_STORAGE = "gateway_api_key";
+    const USER_ROLE_STORAGE = "gateway_user_role";
     function setText(id, value) { document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); }
-    function getKey() { return localStorage.getItem(KEY) || ""; }
+    function getKey() { return localStorage.getItem(API_KEY_STORAGE) || ""; }
+    function getRole() { return localStorage.getItem(USER_ROLE_STORAGE) || ""; }
+    function updateNav() { document.getElementById("adminLink").style.display = getRole() === "admin" ? "inline-block" : "none"; }
     async function parseResponse(response) {
       const raw = await response.text();
       let data; try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
@@ -63,8 +67,14 @@
       try { setText("profileOut", await apiFetch("/gateway/me")); }
       catch (error) { setText("profileOut", String(error)); }
     }
+    function logout() {
+      localStorage.removeItem(API_KEY_STORAGE);
+      localStorage.removeItem(USER_ROLE_STORAGE);
+      window.location.href = "/gateway/login";
+    }
     document.getElementById("refreshBtn").addEventListener("click", loadProfile);
-    document.getElementById("logoutBtn").addEventListener("click", () => { localStorage.removeItem(KEY); window.location.href = "/gateway/login"; });
+    document.getElementById("logoutBtn").addEventListener("click", logout);
+    updateNav();
     loadProfile();
   </script>
 </body>
