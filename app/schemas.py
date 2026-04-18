@@ -170,6 +170,28 @@ class GatewayChatMessage(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
 
 
+class GatewayChatRequest(BaseModel):
+    model: str = Field(..., min_length=3, max_length=128)
+    messages: list[GatewayChatMessage] = Field(..., min_length=1, max_length=30)
+    max_tokens: int = Field(default=300, ge=1, le=4000)
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+
+
+class GatewayUsageInfo(BaseModel):
+    estimated_input_tokens: int
+    estimated_output_tokens: int
+    charged_tokens: int
+    balance_before: int
+    balance_after: int
+
+
+class GatewayChatResponse(BaseModel):
+    provider: str
+    model: str
+    content: str
+    usage: GatewayUsageInfo
+
+
 class GatewayGenerateRequest(BaseModel):
     model_id: str = Field(..., min_length=3, max_length=128)
     prompt: str = Field(..., min_length=1, max_length=10_000)

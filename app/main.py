@@ -35,6 +35,8 @@ from .schemas import (
     DomainSuggestionsResponse,
     GatewayBalanceResponse,
     GatewayCatalogResponse,
+    GatewayChatRequest,
+    GatewayChatResponse,
     GatewayGenerateRequest,
     GatewayGenerateResponse,
     GatewayModelItem,
@@ -506,6 +508,66 @@ def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depend
             )
             db.commit()
             raise HTTPException(status_code=502, detail=f"Gateway provider error: {exc}")
+
+
+@app.get("/v1/models")
+def openai_compatible_models(user: GatewayUser = Depends(_get_gateway_user_from_bearer)):
+    _ = user
+    with SessionLocal() as db:
+        rows = db.query(GatewayModel).filter(GatewayModel.is_active.is_(True)).order_by(GatewayModel.id.asc()).all()
+    if rows:
+        model_ids = [row.model_key for row in rows]
+    else:
+        model_ids = [item.model_id for item in get_gateway_models()]
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": model_id,
+                "object": "model",
+                "owned_by": "ai-servise-gateway",
+            }
+            for model_id in model_ids
+        ],
+    }
+
+
+@app.post("/v1/chat/completions")
+def openai_compatible_chat_completions(
+    payload: GatewayChatRequest,
+    user: GatewayUser = Depends(_get_gateway_user_from_bearer),
+):
+    prompt = "\n".join(message.content for message in payload.messages if message.role == "user").strip()
+    if not prompt:
+        prompt = payload.messages[-1].content.strip()
+    generate_payload = GatewayGenerateRequest(
+        model_id=payload.model,
+        prompt=prompt,
+        max_tokens=payload.max_tokens,
+        temperature=payload.temperature,
+    )
+    generated = gateway_generate(generate_payload, user)
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        "object": "chat.completion",
+        "created": int(datetime.now(timezone.utc).timestamp()),
+        "model": generated.model_id,
+        "choices": [
+            {
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": generated.answer,
+                },
+            }
+        ],
+        "usage": {
+            "prompt_tokens": generated.prompt_tokens,
+            "completion_tokens": generated.completion_tokens,
+            "total_tokens": generated.total_tokens,
+        },
+    }
 
 
 @app.post("/generate/domains", response_model=DomainSuggestionsResponse)
