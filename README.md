@@ -52,7 +52,7 @@ API is available through Nginx at:
 curl http://127.0.0.1:8080/health
 ```
 
-## 4 working modes (single endpoint)
+## 3 working modes (single endpoint)
 
 Unified endpoint:
 
@@ -64,8 +64,7 @@ Supported modes:
 
 1. `chat` - standard assistant response
 2. `domains` - domain list generation without numbering/comments
-3. `php_page` - content generation into provided page template
-4. `support_faq` - support response using imported FAQ history
+3. `support_faq` - support response using imported FAQ history
 
 Mode examples:
 
@@ -80,30 +79,81 @@ curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"domains","payload":{"business_context":"регистрация доменов и хостинг","keywords":["domain","cloud"],"zone":".ru","count":5}}'
 
-# 3) php_page
-curl -X POST "http://127.0.0.1:8080/mode/run" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"php_page","payload":{"template_html":"<html><body><h1>Услуга</h1><div>{{content}}</div></body></html>","content_prompt":"Подготовь текст для страницы услуги VPS"}}'
-
-# 4) support_faq
+# 3) support_faq
 curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"support_faq","payload":{"question":"Как продлить домен?","max_context_items":5}}'
 ```
 
-FAQ import examples:
+### PHP page generation (file output only)
+
+`php_page` mode is intentionally disabled in `/mode/run`.
+Use the dedicated endpoint below to generate and download a `.php` file from a named template:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/page-template/generate-file" \
+  -H "Content-Type: application/json" \
+  -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст страницы хостинга","output_filename":"hosting-generated.php"}' \
+  --output hosting-generated.php
+```
+
+### FAQ import examples
+
+If `ADMIN_API_KEY` is configured in `.env`, include the header `X-API-Key`.
 
 ```bash
 # structured FAQ import
 curl -X POST "http://127.0.0.1:8080/support/faq/import" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-admin-key" \
   -d '{"items":[{"question":"Как продлить домен?","answer":"Продление доступно в личном кабинете.","source":"support_chat"}]}'
 
 # import from support transcript text
 curl -X POST "http://127.0.0.1:8080/support/dialogs/import" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-admin-key" \
   -d '{"transcript":"Q: Как продлить домен?\nA: Через личный кабинет."}'
 ```
+
+### How `ADMIN_API_KEY` works (simple)
+
+`ADMIN_API_KEY` protects only admin-like import endpoints:
+
+- `POST /support/faq/import`
+- `POST /support/dialogs/import`
+
+If `ADMIN_API_KEY` is empty in `.env`, these endpoints work **without** a key.
+
+If `ADMIN_API_KEY` is set, each import request must include:
+
+```http
+X-API-Key: <your key from .env>
+```
+
+Quick setup:
+
+1. Open `.env` and set:
+
+```env
+ADMIN_API_KEY=my-secret-key-123
+```
+
+2. Restart API:
+
+```bash
+docker compose up -d --build
+```
+
+3. Use key in request:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/support/faq/import" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: my-secret-key-123" \
+  -d '{"items":[{"question":"Как продлить домен?","answer":"Через личный кабинет.","source":"support_chat"}]}'
+```
+
+Without key (or with wrong key) API returns `401`.
 
 - Generic text generation:
 
@@ -140,6 +190,14 @@ curl "http://127.0.0.1:8080/history?limit=5"
 ```bash
 curl "http://127.0.0.1:8080/stats"
 ```
+
+`/stats` now also includes FAQ quality metrics:
+
+- `support_faq_total_requests` - number of support FAQ requests evaluated
+- `support_faq_zero_match_total` - count of requests with zero overlap to FAQ context
+- `support_faq_no_match_rate` - share of requests with zero overlap to FAQ context
+- `support_faq_avg_relevance_score` - average overlap score (higher is better)
+- `support_faq_top_questions` - most frequent normalized support questions
 
 ## Migrations (Alembic)
 

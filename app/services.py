@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -195,6 +196,56 @@ def run_support_faq_mode(
         messages=[{"role": "user", "content": composed_prompt}],
     )
     return resp["message"]["content"]
+
+
+def _tokenize_for_relevance(text: str) -> set[str]:
+    tokens = re.findall(r"[a-zA-Zа-яА-Я0-9]+", text.lower())
+    return {token for token in tokens if len(token) >= 3}
+
+
+def normalize_text_for_metric(text: str) -> str:
+    normalized = " ".join(re.findall(r"[a-zA-Zа-яА-Я0-9]+", text.lower())).strip()
+    return normalized[:512] if normalized else "unknown-question"
+
+
+@dataclass(frozen=True)
+class RankedFaqPair:
+    pair: tuple[str, str]
+    score: int
+
+
+def select_relevant_faq_pairs(
+    user_question: str,
+    faq_pairs: list[tuple[str, str]],
+    max_items: int,
+) -> list[RankedFaqPair]:
+    question_tokens = _tokenize_for_relevance(user_question)
+    if not faq_pairs:
+        return []
+
+    scored: list[tuple[int, int, tuple[str, str]]] = []
+    for index, pair in enumerate(faq_pairs):
+        q, a = pair
+        pair_tokens = _tokenize_for_relevance(f"{q} {a}")
+        score = len(question_tokens.intersection(pair_tokens))
+        scored.append((score, index, pair))
+
+    ranked = sorted(
+        scored,
+        key=lambda item: (item[0], item[1]),
+        reverse=True,
+    )
+    selected: list[RankedFaqPair] = []
+    for score, _, pair in ranked:
+        if score <= 0 and selected:
+            continue
+        selected.append(RankedFaqPair(pair=pair, score=score))
+        if len(selected) >= max_items:
+            break
+
+    if selected:
+        return selected
+    return [RankedFaqPair(pair=pair, score=0) for pair in faq_pairs[:max_items]]
 
 
 def extract_support_faq_pairs(transcript: str) -> list[tuple[str, str]]:

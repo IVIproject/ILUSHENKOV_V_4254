@@ -62,6 +62,11 @@ class SupportFaqImportResponse(BaseModel):
     imported: int
 
 
+class SupportDialogsImportResponse(BaseModel):
+    imported: int
+    parsed_pairs: int
+
+
 class SupportFaqAskRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=2000)
     max_context_items: int = Field(default=5, ge=1, le=20)
@@ -73,7 +78,7 @@ class SupportFaqAskResponse(BaseModel):
 
 
 class ModeRunRequest(BaseModel):
-    mode: str = Field(..., description="chat | domains | php_page | support_faq")
+    mode: str = Field(..., description="chat | domains | support_faq")
     payload: dict = Field(default_factory=dict)
 
 
@@ -97,4 +102,9 @@ class StatsResponse(BaseModel):
     requests_last_24h: int
     average_prompt_length: float
     average_answer_length: float
+    support_faq_total_requests: int
+    support_faq_zero_match_total: int
+    support_faq_no_match_rate: float
+    support_faq_avg_relevance_score: float
+    support_faq_top_questions: list[str]
     latest_request_at: datetime | None = None

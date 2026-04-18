@@ -1,6 +1,4 @@
 import os
-import tempfile
-
 os.environ["DATABASE_URL"] = "sqlite:////tmp/ai_servise_test.db"
 os.environ["OLLAMA_HOST"] = "http://fake-ollama"
 os.environ["OLLAMA_MODEL"] = "qwen2.5:3b"
@@ -9,7 +7,7 @@ os.environ["LOG_LEVEL"] = "INFO"
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.db import Base, engine
-from app.models import SupportFaqEntry
+from app.models import SupportFaqEntry, SupportFaqQueryMetric
 
 class FakeClient:
     def list(self):
@@ -50,6 +48,7 @@ Base.metadata.create_all(bind=engine)
 
 def _clear_faq_table():
     with main_module.SessionLocal() as db:
+        db.query(SupportFaqQueryMetric).delete()
         db.query(SupportFaqEntry).delete()
         db.commit()
 
@@ -108,6 +107,10 @@ def test_stats():
     assert "total_requests" in data
     assert data["total_requests"] >= 1
     assert "requests_last_24h" in data
+    assert "support_faq_total_requests" in data
+    assert "support_faq_no_match_rate" in data
+    assert "support_faq_avg_relevance_score" in data
+    assert isinstance(data["support_faq_top_questions"], list)
 
 
 def test_mode_chat():
@@ -140,23 +143,32 @@ def test_mode_domains_list():
     assert all(" " not in x for x in out)
 
 
-def test_mode_php_template():
-    template = "<html><body><h1>{{title}}</h1><p>{{content}}</p></body></html>"
+def test_mode_php_page_removed_from_mode_runner():
     r = client.post(
         "/mode/run",
         json={
             "mode": "php_page",
-            "payload": {
-                "content_prompt": "Услуга VPS-хостинга",
-                "template_html": template,
-            },
+            "payload": {"content_prompt": "Услуга VPS-хостинга"},
+        },
+    )
+    assert r.status_code == 400
+    assert "POST /page-template/generate-file" in r.json()["detail"]
+
+
+def test_page_template_generate_file():
+    r = client.post(
+        "/page-template/generate-file",
+        json={
+            "template_name": "hosting",
+            "content_prompt": "Сделай текст лендинга хостинга",
+            "output_filename": "generated-hosting.php",
         },
     )
     assert r.status_code == 200
-    output = r.json()["result"]["php_page"]
-    assert "<html>" in output
-    assert "{{content}}" not in output
-    assert "{{content}}" not in output
+    assert r.headers["content-type"].startswith("application/x-httpd-php")
+    disposition = r.headers.get("content-disposition", "")
+    assert "generated-hosting.php" in disposition
+    assert "<?" in r.text
 
 
 def test_faq_import_and_support_mode():
@@ -187,30 +199,88 @@ def test_faq_import_and_support_mode():
 
 def test_support_dialog_import():
     _clear_faq_table()
-    fd, path = tempfile.mkstemp(prefix="support_dialog_", suffix=".csv")
-    os.close(fd)
+    r = client.post(
+        "/support/dialogs/import",
+        json={"transcript": "Q: Где найти DNS?\nA: DNS доступны в панели управления доменом."},
+    )
+    assert r.status_code == 200
+    assert r.json()["parsed_pairs"] >= 1
+    assert r.json()["imported"] >= 1
+
+
+def test_support_faq_relevance_limit():
+    _clear_faq_table()
+    r_import = client.post(
+        "/support/faq/import",
+        json={
+            "items": [
+                {
+                    "question": "Как настроить DNS-записи?",
+                    "answer": "Откройте раздел DNS в панели домена.",
+                    "source": "support_chat",
+                },
+                {
+                    "question": "Как получить счет на оплату?",
+                    "answer": "Счет доступен в разделе Финансы.",
+                    "source": "support_chat",
+                },
+            ]
+        },
+    )
+    assert r_import.status_code == 200
+
+    r = client.post(
+        "/support/faq/ask",
+        json={"question": "Где изменить DNS?", "max_context_items": 1},
+    )
+    assert r.status_code == 200
+    assert r.json()["matched_items"] == 1
+
+    stats = client.get("/stats")
+    assert stats.status_code == 200
+    metrics = stats.json()
+    assert metrics["support_faq_total_requests"] >= 1
+    assert metrics["support_faq_avg_relevance_score"] >= 0.0
+
+
+def test_admin_api_key_protects_import_endpoints():
+    _clear_faq_table()
+    previous = main_module.settings.admin_api_key
+    main_module.settings.admin_api_key = "secret-key"
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(
-                "question,answer\n"
-                "\"Где найти DNS?\",\"DNS доступны в панели управления доменом.\""
-            )
-        with open(path, "r", encoding="utf-8") as f:
-            csv_text = f.read()
-        r = client.post(
+        r_unauthorized = client.post(
             "/support/faq/import",
             json={
                 "items": [
                     {
-                        "question": "Где найти DNS?",
-                        "answer": "DNS доступны в панели управления доменом.",
+                        "question": "Question one",
+                        "answer": "Answer one",
                         "source": "support_chat",
                     }
                 ]
             },
         )
-        assert r.status_code == 200
-        assert r.json()["imported"] >= 1
+        assert r_unauthorized.status_code == 401
+
+        r_authorized = client.post(
+            "/support/faq/import",
+            headers={"X-API-Key": "secret-key"},
+            json={
+                "items": [
+                    {
+                        "question": "Question 2",
+                        "answer": "Answer 2",
+                        "source": "support_chat",
+                    }
+                ]
+            },
+        )
+        assert r_authorized.status_code == 200
+
+        r_dialog_unauthorized = client.post(
+            "/support/dialogs/import",
+            json={"transcript": "Q: Где DNS?\nA: В панели домена."},
+        )
+        assert r_dialog_unauthorized.status_code == 401
     finally:
-        if os.path.exists(path):
-            os.remove(path)
+        main_module.settings.admin_api_key = previous
