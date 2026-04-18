@@ -60,7 +60,10 @@ New gateway capabilities:
 - model catalog with local and external provider routing
 - pay-per-token balance accounting
 - external proxy to OpenAI-compatible upstream (for example ChatGPT)
-- full web cabinet on `/gateway` (user + admin tabs)
+- separated pages:
+  - `/gateway` - login and registration only
+  - `/gateway/profile` - user cabinet
+  - `/gateway/admin` - admin cabinet
 - balance audit log for each financial operation
 
 ### Gateway setup
@@ -72,7 +75,7 @@ OLLAMA_MODEL=qwen2.5:3b
 OLLAMA_SECONDARY_MODEL=llama3.2:3b
 OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions
 OPENAI_API_KEY=
-GATEWAY_ADMIN_API_KEY=change-me-gateway-admin-key
+GATEWAY_ADMIN_EMAILS=admin@example.com,owner@example.com
 ```
 
 Notes:
@@ -80,60 +83,69 @@ Notes:
 - `OLLAMA_MODEL` and `OLLAMA_SECONDARY_MODEL` are local Ollama models.
 - if `OPENAI_API_KEY` is empty, proxy model calls return provider error.
 - `OPENAI_BASE_URL` may be either API base (`https://api.openai.com/v1`) or full chat-completions URL.
-- `GATEWAY_ADMIN_API_KEY` protects gateway admin endpoints. If empty, fallback is `ADMIN_API_KEY`.
+- admin role is assigned by email list in `GATEWAY_ADMIN_EMAILS`.
+- if a user logs in with email from `GATEWAY_ADMIN_EMAILS`, they get admin access.
 
 ### Browser usage (step-by-step)
 
-After startup, open in browser:
+#### 1) Login/registration page
+
+Open:
 
 - `http://127.0.0.1:8080/gateway`
 
-You will see two tabs: **Пользователь** and **Админ**.
+This page has only 2 forms:
 
-#### User flow (Пользователь)
+- registration
+- login
 
-1. Registration:
-   - fill `Email`, `Пароль`, `Тариф`
-   - click `Создать аккаунт`
-2. Login later:
-   - fill `Email`, `Пароль`
-   - click `Войти и получить ключ`
-3. Balance and profile:
-   - click `Обновить профиль`
-4. Top up tokens:
-   - set token amount
-   - click `Пополнить`
-5. Model call:
-   - click `Обновить список моделей`
-   - choose model
-   - enter prompt
-   - click `Отправить`
-6. Logs:
-   - `Показать usage` for generation calls
-   - `Показать операции` for financial operations (top-up, charges, admin adjustments)
+No user/admin switching there.
 
-#### Admin flow (Админ)
+#### 2) User cabinet
 
-1. Put `GATEWAY_ADMIN_API_KEY` value into the admin key field.
-2. Click `Загрузить пользователей`.
-3. For each user you can:
-   - change tariff
-   - set absolute balance (`set_balance_tokens`)
-   - add/subtract tokens (`add_tokens`)
-   - provide `reason` for balance change
-   - activate/deactivate account
+After login as normal user you go to:
+
+- `http://127.0.0.1:8080/gateway/profile`
+
+Available actions:
+
+1. Save API key to browser localStorage.
+2. Refresh profile and balance.
+3. Top up token balance.
+4. Load models list.
+5. Enter prompt and call model.
+6. See estimated request price before sending (`POST /gateway/estimate-cost`).
+7. See usage logs and financial operations.
+
+#### 3) Admin cabinet
+
+If your email is in `GATEWAY_ADMIN_EMAILS`, after login you can open:
+
+- `http://127.0.0.1:8080/gateway/admin`
+
+Admin actions:
+
+1. User management:
+   - change email / role / labels
+   - set or add/subtract balance
+   - deactivate/activate
    - regenerate API key
-4. Click `Usage` to see user generation log.
-5. Open `Все финансовые операции` and click `Показать финансовые операции`:
-   - all operations
-   - optional filter by `user_id`
+   - delete user (`DELETE /gateway/admin/users/{user_id}`)
+2. Model pricing management:
+   - edit `price_per_1k_tokens`
+   - for external providers: set `external_price_per_1k_tokens` and `markup_percent`
+   - disable/enable model
+3. Usage and financial audit:
+   - per-user usage
+   - global balance audit
+   - audit filtered by `user_id`
 
 ### Register user and get API key (API example)
 
 ```bash
 curl -X POST "http://127.0.0.1:8080/gateway/register" \
   -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"strong-pass-123","tariff_code":"starter"}'
+  -d '{"email":"user@example.com","password":"strong-pass-123","tariff_code":"default"}'
 ```
 
 Top up test balance:
@@ -204,6 +216,17 @@ Billing is token-based:
 - usage transaction is saved in `gateway_usage_logs`
 - financial transactions are saved in `gateway_balance_audit_logs`
 
+### Prompt price estimate (before generate)
+
+Get approximate cost before request:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/gateway/estimate-cost" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: asv_your_key_here" \
+  -d '{"model_id":"local/qwen2.5-3b","prompt":"Коротко расскажи про VPS"}'
+```
+
 ### Balance audit endpoints
 
 User own audit:
@@ -217,14 +240,14 @@ Admin all audits:
 
 ```bash
 curl -X GET "http://127.0.0.1:8080/gateway/admin/audit/balance?limit=100" \
-  -H "X-Gateway-Admin-Key: your-admin-key"
+  -H "X-Gateway-Key: asv_admin_key_here"
 ```
 
 Admin filtered by user:
 
 ```bash
 curl -X GET "http://127.0.0.1:8080/gateway/admin/audit/balance?limit=100&user_id=5" \
-  -H "X-Gateway-Admin-Key: your-admin-key"
+  -H "X-Gateway-Key: asv_admin_key_here"
 ```
 
 ## 3 working modes (single endpoint)
@@ -330,22 +353,24 @@ curl -X POST "http://127.0.0.1:8080/support/faq/import" \
 
 Without key (or with wrong key) API returns `401`.
 
-### How `GATEWAY_ADMIN_API_KEY` works (gateway admin)
+### How admin access works now
 
-`GATEWAY_ADMIN_API_KEY` protects gateway admin endpoints:
+Gateway admin endpoints now use **user role**, not a separate header key.
 
-- `GET /gateway/admin/users`
-- `PATCH /gateway/admin/users/{user_id}`
-- `GET /gateway/admin/users/{user_id}/usage`
-- `GET /gateway/admin/audit/balance`
+Admin role source:
 
-If `GATEWAY_ADMIN_API_KEY` is empty, the gateway admin endpoints fallback to `ADMIN_API_KEY`.
-If both keys are empty, admin gateway endpoints return `503` (not configured).
+- set admin emails in `.env`:
 
-Required header:
+```env
+GATEWAY_ADMIN_EMAILS=admin@example.com,owner@example.com
+```
+
+- any account with email from that list becomes admin (on register/login).
+
+To call admin endpoints use normal gateway user header with an admin user's key:
 
 ```http
-X-Gateway-Admin-Key: <gateway-admin-key>
+X-Gateway-Key: <admin-user-api-key>
 ```
 
 - Generic text generation:

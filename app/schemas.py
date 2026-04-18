@@ -113,7 +113,6 @@ class StatsResponse(BaseModel):
 class GatewayUserRegisterRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=255)
     password: str = Field(..., min_length=8, max_length=255)
-    tariff_code: str = Field(default="starter", min_length=3, max_length=32)
 
 
 class GatewayLoginRequest(BaseModel):
@@ -125,6 +124,7 @@ class GatewayUserResponse(BaseModel):
     user_id: int
     email: str
     api_key: str
+    role: str = "user"
     token_balance: int
     tariff_code: str
     is_active: bool = True
@@ -133,6 +133,7 @@ class GatewayUserResponse(BaseModel):
 class GatewayMeResponse(BaseModel):
     user_id: int
     email: str
+    role: str
     tariff_code: str
     token_balance: int
     is_active: bool
@@ -146,19 +147,6 @@ class GatewayTopUpRequest(BaseModel):
 class GatewayTopUpResponse(BaseModel):
     user_id: int
     token_balance: int
-
-
-class GatewayTariffItem(BaseModel):
-    code: str
-    name: str
-    monthly_price_rub: int
-    included_tokens: int
-    overage_price_per_1k_tokens_rub: float
-    features: list[str]
-
-
-class GatewayTariffsResponse(BaseModel):
-    tariffs: list[GatewayTariffItem]
 
 
 class GatewayBalanceResponse(BaseModel):
@@ -204,6 +192,7 @@ class GatewayBalanceAuditResponse(BaseModel):
 class GatewayAdminUserItem(BaseModel):
     user_id: int
     email: str
+    role: str
     tariff_code: str
     token_balance: int
     is_active: bool
@@ -220,7 +209,8 @@ class GatewayAdminUsersResponse(BaseModel):
 
 class GatewayAdminUserUpdateRequest(BaseModel):
     email: str | None = Field(default=None, min_length=5, max_length=255)
-    tariff_code: str | None = Field(default=None, min_length=3, max_length=32)
+    role: str | None = Field(default=None, min_length=4, max_length=16)
+    tariff_code: str | None = Field(default=None, min_length=3, max_length=64)
     set_balance_tokens: int | None = Field(default=None, ge=0, le=50_000_000)
     add_tokens: int | None = Field(default=None, ge=-5_000_000, le=5_000_000)
     balance_reason: str | None = Field(default=None, min_length=2, max_length=255)
@@ -234,7 +224,35 @@ class GatewayModelItem(BaseModel):
     provider: str
     target_model: str
     price_per_1k_tokens: float
+    external_price_per_1k_tokens: float | None = None
+    markup_percent: float = 0.0
     is_active: bool
+
+
+class GatewayEstimateCostRequest(BaseModel):
+    model_id: str = Field(..., min_length=3, max_length=128)
+    prompt: str = Field(..., min_length=1, max_length=10_000)
+
+
+class GatewayEstimateCostResponse(BaseModel):
+    model_id: str
+    provider: str
+    estimated_prompt_tokens: int
+    estimated_response_tokens: int
+    estimated_total_tokens: int
+    estimated_tokens_to_charge: int
+    price_per_1k_tokens: float
+    balance_after_estimate: int
+
+
+class GatewayAdminModelUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=2, max_length=255)
+    target_model: str | None = Field(default=None, min_length=2, max_length=255)
+    provider: str | None = Field(default=None, min_length=2, max_length=32)
+    price_per_1k_tokens: float | None = Field(default=None, ge=0.0, le=1_000_000.0)
+    external_price_per_1k_tokens: float | None = Field(default=None, ge=0.0, le=1_000_000.0)
+    markup_percent: float | None = Field(default=None, ge=0.0, le=10_000.0)
+    is_active: bool | None = None
 
 
 class GatewayCatalogResponse(BaseModel):

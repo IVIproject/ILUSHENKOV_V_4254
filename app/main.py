@@ -16,10 +16,8 @@ from .gateway_services import (
     estimate_text_tokens,
     generate_api_key,
     get_gateway_models,
-    get_tariff_plans,
     hash_password,
     normalize_email,
-    resolve_gateway_model,
     verify_password,
 )
 from .logging_config import get_logger, setup_logging
@@ -35,6 +33,7 @@ from .models import (
 from .schemas import (
     DomainSuggestionsRequest,
     DomainSuggestionsResponse,
+    GatewayAdminModelUpdateRequest,
     GatewayAdminUserItem,
     GatewayAdminUserUpdateRequest,
     GatewayAdminUsersResponse,
@@ -46,11 +45,11 @@ from .schemas import (
     GatewayChatResponse,
     GatewayGenerateRequest,
     GatewayGenerateResponse,
+    GatewayEstimateCostRequest,
+    GatewayEstimateCostResponse,
     GatewayLoginRequest,
     GatewayMeResponse,
     GatewayModelItem,
-    GatewayTariffItem,
-    GatewayTariffsResponse,
     GatewayTopUpRequest,
     GatewayTopUpResponse,
     GatewayUsageLogItem,
@@ -132,20 +131,115 @@ def _verify_admin_api_key(
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
 
 
-def _verify_gateway_admin_key(
-    admin_key: str | None = Header(default=None, alias="X-Gateway-Admin-Key"),
-) -> None:
-    expected = settings.gateway_admin_api_key or settings.admin_api_key
-    if not expected:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Gateway admin key is not configured. "
-                "Set GATEWAY_ADMIN_API_KEY (or ADMIN_API_KEY) in .env."
-            ),
+def _admin_emails_set() -> set[str]:
+    raw = settings.gateway_admin_emails.strip()
+    if not raw:
+        return set()
+    return {normalize_email(item) for item in raw.split(",") if item.strip()}
+
+
+def _is_admin_email(email: str) -> bool:
+    return normalize_email(email) in _admin_emails_set()
+
+
+def _is_admin_user(user: GatewayUser) -> bool:
+    if not user.is_active:
+        return False
+    if user.role == "admin":
+        return True
+    return _is_admin_email(user.email)
+
+
+def _effective_model_price_per_1k(row: GatewayModel) -> float:
+    if row.external_price_per_1k_tokens is not None:
+        return float(row.external_price_per_1k_tokens) * (1.0 + float(row.markup_percent) / 100.0)
+    return float(row.price_per_1k_tokens)
+
+
+def _model_item_from_row(row: GatewayModel) -> GatewayModelItem:
+    return GatewayModelItem(
+        model_id=row.model_key,
+        display_name=row.display_name,
+        provider=row.provider,
+        target_model=row.target_model,
+        price_per_1k_tokens=round(_effective_model_price_per_1k(row), 6),
+        external_price_per_1k_tokens=row.external_price_per_1k_tokens,
+        markup_percent=float(row.markup_percent or 0.0),
+        is_active=row.is_active,
+    )
+
+
+def _ensure_catalog_seeded(db) -> None:
+    existing = db.query(GatewayModel.id).limit(1).first()
+    if existing:
+        return
+    for model in get_gateway_models():
+        db.add(
+            GatewayModel(
+                model_key=model.model_id,
+                display_name=model.label,
+                provider=model.provider,
+                target_model=model.upstream_model,
+                price_per_1k_tokens=float(model.cost_per_1k_tokens),
+                external_price_per_1k_tokens=(
+                    float(model.cost_per_1k_tokens) if model.provider == "openai" else None
+                ),
+                markup_percent=15.0 if model.provider == "openai" else 0.0,
+                is_active=True,
+            )
         )
-    if not admin_key or admin_key != expected:
-        raise HTTPException(status_code=401, detail="Invalid or missing X-Gateway-Admin-Key")
+    db.commit()
+
+
+def _resolve_model_for_request(db, model_id: str) -> GatewayModel:
+    normalized = model_id.strip().lower()
+    row = (
+        db.query(GatewayModel)
+        .filter(
+            func.lower(GatewayModel.model_key) == normalized,
+            GatewayModel.is_active.is_(True),
+        )
+        .first()
+    )
+    if row:
+        return row
+
+    row = (
+        db.query(GatewayModel)
+        .filter(
+            func.lower(GatewayModel.target_model) == normalized,
+            GatewayModel.is_active.is_(True),
+        )
+        .first()
+    )
+    if row:
+        return row
+
+    row = (
+        db.query(GatewayModel)
+        .filter(
+            func.lower(GatewayModel.display_name) == normalized,
+            GatewayModel.is_active.is_(True),
+        )
+        .first()
+    )
+    if row:
+        return row
+
+    raise HTTPException(status_code=404, detail=f"Unknown model_id: {model_id}")
+
+
+def _charge_for_model(total_tokens: int, model_row: GatewayModel) -> int:
+    return compute_token_charge(total_tokens, _effective_model_price_per_1k(model_row))
+
+
+def _estimate_charge_for_prompt(prompt: str, price_per_1k_tokens: float) -> tuple[int, int, int]:
+    prompt_tokens = estimate_text_tokens(prompt)
+    # Conservative preview: estimate output roughly at 60% of input
+    completion_tokens = max(32, int(round(prompt_tokens * 0.6)))
+    total_tokens = prompt_tokens + completion_tokens
+    estimated_charge = compute_token_charge(total_tokens, max(0.0, price_per_1k_tokens))
+    return prompt_tokens, completion_tokens, estimated_charge
 
 
 def _get_gateway_user(gateway_key: str | None = Header(default=None, alias="X-Gateway-Key")) -> GatewayUser:
@@ -172,6 +266,12 @@ def _get_gateway_user_from_bearer(authorization: str | None = Header(default=Non
     if not token:
         raise HTTPException(status_code=401, detail="Bearer token is empty")
     return _get_gateway_user(token)
+
+
+def _verify_gateway_admin_key(user: GatewayUser = Depends(_get_gateway_user)) -> GatewayUser:
+    if not _is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return user
 
 
 def _verify_gateway_user_password(user: GatewayUser, password: str) -> bool:
@@ -390,50 +490,42 @@ def gateway_landing_page():
     return page.read_text(encoding="utf-8")
 
 
-@app.get("/gateway/tariffs", response_model=GatewayTariffsResponse)
-def gateway_tariffs():
-    tariffs = get_tariff_plans()
-    return GatewayTariffsResponse(
-        tariffs=[
-            GatewayTariffItem(
-                code=item.code,
-                name=item.name,
-                monthly_price_rub=item.price_rub,
-                included_tokens=item.tokens,
-                overage_price_per_1k_tokens_rub=round(item.price_rub / max(1, item.tokens / 1000), 2),
-                features=[
-                    "API key access",
-                    "Local model routing",
-                    "Provider proxy support",
-                    item.description,
-                ],
-            )
-            for item in tariffs
-        ]
-    )
+@app.get("/gateway/profile", response_class=HTMLResponse)
+def gateway_profile_page():
+    page = Path("templates/gateway/profile.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway profile page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/admin", response_class=HTMLResponse)
+def gateway_admin_page():
+    page = Path("templates/gateway/admin.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway admin page not found")
+    return page.read_text(encoding="utf-8")
 
 
 @app.post("/gateway/register", response_model=GatewayUserResponse)
 def gateway_register(payload: GatewayUserRegisterRequest):
     email = normalize_email(payload.email)
-    plans = {plan.code: plan for plan in get_tariff_plans()}
-    plan = plans.get(payload.tariff_code)
-    if not plan:
-        raise HTTPException(status_code=400, detail=f"Unsupported tariff_code: {payload.tariff_code}")
 
     password_salt, password_digest = hash_password(payload.password)
     password_hash = f"{password_salt}${password_digest}"
     api_key, _, _, _ = generate_api_key()
     with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
         exists = db.query(GatewayUser).filter(GatewayUser.email == email).first()
         if exists:
             raise HTTPException(status_code=409, detail="Email already registered")
+        role = "admin" if _is_admin_email(email) else "user"
         user = GatewayUser(
             email=email,
             password_hash=password_hash,
             api_key=api_key,
+            role=role,
             tokens_balance=0,
-            plan=plan.code,
+            plan="default",
             is_active=True,
         )
         db.add(user)
@@ -443,6 +535,7 @@ def gateway_register(payload: GatewayUserRegisterRequest):
             user_id=user.id,
             email=user.email,
             api_key=user.api_key,
+            role=user.role,
             token_balance=user.tokens_balance,
             tariff_code=user.plan,
             is_active=user.is_active,
@@ -453,15 +546,21 @@ def gateway_register(payload: GatewayUserRegisterRequest):
 def gateway_login(payload: GatewayLoginRequest):
     email = normalize_email(payload.email)
     with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
         user = db.query(GatewayUser).filter(GatewayUser.email == email).first()
         if not user or not _verify_gateway_user_password(user, payload.password):
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if not user.is_active:
             raise HTTPException(status_code=403, detail="Gateway user is inactive")
+        if _is_admin_email(user.email) and user.role != "admin":
+            user.role = "admin"
+            db.commit()
+            db.refresh(user)
         return GatewayUserResponse(
             user_id=user.id,
             email=user.email,
             api_key=user.api_key,
+            role=user.role,
             token_balance=user.tokens_balance,
             tariff_code=user.plan,
             is_active=user.is_active,
@@ -473,6 +572,7 @@ def gateway_me(user: GatewayUser = Depends(_get_gateway_user)):
     return GatewayMeResponse(
         user_id=user.id,
         email=user.email,
+        role=user.role,
         tariff_code=user.plan,
         token_balance=user.tokens_balance,
         is_active=user.is_active,
@@ -573,6 +673,7 @@ def gateway_admin_users(
             GatewayAdminUserItem(
                 user_id=row.id,
                 email=row.email,
+                role=row.role,
                 tariff_code=row.plan,
                 token_balance=row.tokens_balance,
                 is_active=row.is_active,
@@ -592,8 +693,9 @@ def gateway_admin_update_user(
     payload: GatewayAdminUserUpdateRequest,
     _: None = Depends(_verify_gateway_admin_key),
 ):
-    plans = {plan.code for plan in get_tariff_plans()}
+    valid_roles = {"user", "admin"}
     with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
         user_row = db.query(GatewayUser).filter(GatewayUser.id == user_id).first()
         if not user_row:
             raise HTTPException(status_code=404, detail="Gateway user not found")
@@ -609,11 +711,17 @@ def gateway_admin_update_user(
             if exists:
                 raise HTTPException(status_code=409, detail="Email already registered by another user")
             user_row.email = normalized_email
+            if _is_admin_email(normalized_email):
+                user_row.role = "admin"
 
         if payload.tariff_code is not None:
-            if payload.tariff_code not in plans:
-                raise HTTPException(status_code=400, detail=f"Unsupported tariff_code: {payload.tariff_code}")
             user_row.plan = payload.tariff_code
+
+        if payload.role is not None:
+            normalized_role = payload.role.strip().lower()
+            if normalized_role not in valid_roles:
+                raise HTTPException(status_code=400, detail=f"Unsupported role: {payload.role}")
+            user_row.role = normalized_role
 
         if payload.set_balance_tokens is not None:
             user_row.tokens_balance = payload.set_balance_tokens
@@ -650,6 +758,7 @@ def gateway_admin_update_user(
             user_id=user_row.id,
             email=user_row.email,
             api_key=user_row.api_key,
+            role=user_row.role,
             token_balance=user_row.tokens_balance,
             tariff_code=user_row.plan,
             is_active=user_row.is_active,
@@ -709,38 +818,97 @@ def gateway_admin_balance_audit(
     return GatewayBalanceAuditResponse(items=[_to_balance_audit_item(row) for row in rows])
 
 
+@app.delete("/gateway/admin/users/{user_id}")
+def gateway_admin_delete_user(
+    user_id: int,
+    _: None = Depends(_verify_gateway_admin_key),
+):
+    with SessionLocal() as db:
+        user_row = db.query(GatewayUser).filter(GatewayUser.id == user_id).first()
+        if not user_row:
+            raise HTTPException(status_code=404, detail="Gateway user not found")
+        db.query(GatewayBalanceAuditLog).filter(GatewayBalanceAuditLog.user_id == user_id).delete()
+        db.query(GatewayUsageLog).filter(GatewayUsageLog.user_id == user_id).delete()
+        db.delete(user_row)
+        db.commit()
+    return {"deleted": True, "user_id": user_id}
+
+
 @app.get("/gateway/models", response_model=GatewayCatalogResponse)
 def gateway_models(_: GatewayUser = Depends(_get_gateway_user)):
     with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
         rows = db.query(GatewayModel).filter(GatewayModel.is_active.is_(True)).order_by(GatewayModel.id.asc()).all()
-    if not rows:
-        catalog = get_gateway_models()
-        return GatewayCatalogResponse(
-            models=[
-                GatewayModelItem(
-                    model_id=m.model_id,
-                    display_name=m.label,
-                    provider=m.provider,
-                    target_model=m.upstream_model,
-                    price_per_1k_tokens=float(m.cost_per_1k_tokens),
-                    is_active=True,
-                )
-                for m in catalog
-            ]
-        )
     return GatewayCatalogResponse(
-        models=[
-            GatewayModelItem(
-                model_id=row.model_key,
-                display_name=row.display_name,
-                provider=row.provider,
-                target_model=row.target_model,
-                price_per_1k_tokens=row.price_per_1k_tokens,
-                is_active=row.is_active,
-            )
-            for row in rows
-        ]
+        models=[_model_item_from_row(row) for row in rows]
     )
+
+
+@app.post("/gateway/estimate-cost", response_model=GatewayEstimateCostResponse)
+def gateway_estimate_cost(payload: GatewayEstimateCostRequest, user: GatewayUser = Depends(_get_gateway_user)):
+    prompt = payload.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
+        model = _resolve_model_for_request(db, payload.model_id)
+        price_per_1k = _effective_model_price_per_1k(model)
+        prompt_tokens, completion_tokens, estimated_charge = _estimate_charge_for_prompt(prompt, price_per_1k)
+        total_tokens = prompt_tokens + completion_tokens
+        user_row = db.query(GatewayUser).filter(GatewayUser.id == user.id).first()
+        if not user_row:
+            raise HTTPException(status_code=404, detail="Gateway user not found")
+        balance_after = int(user_row.tokens_balance) - int(estimated_charge)
+    return GatewayEstimateCostResponse(
+        model_id=model.model_key,
+        provider=model.provider,
+        estimated_prompt_tokens=prompt_tokens,
+        estimated_response_tokens=completion_tokens,
+        estimated_total_tokens=total_tokens,
+        estimated_tokens_to_charge=int(estimated_charge),
+        price_per_1k_tokens=float(price_per_1k),
+        balance_after_estimate=balance_after,
+    )
+
+
+@app.get("/gateway/admin/models", response_model=GatewayCatalogResponse)
+def gateway_admin_models(_: GatewayUser = Depends(_verify_gateway_admin_key)):
+    with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
+        rows = db.query(GatewayModel).order_by(GatewayModel.id.asc()).all()
+    return GatewayCatalogResponse(models=[_model_item_from_row(row) for row in rows])
+
+
+@app.patch("/gateway/admin/models/{model_id:path}", response_model=GatewayModelItem)
+def gateway_admin_update_model(
+    model_id: str,
+    payload: GatewayAdminModelUpdateRequest,
+    _: GatewayUser = Depends(_verify_gateway_admin_key),
+):
+    with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
+        row = db.query(GatewayModel).filter(func.lower(GatewayModel.model_key) == model_id.strip().lower()).first()
+        if not row:
+            row = db.query(GatewayModel).filter(func.lower(GatewayModel.target_model) == model_id.strip().lower()).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Unknown model_id: {model_id}")
+        if payload.display_name is not None:
+            row.display_name = payload.display_name.strip()
+        if payload.target_model is not None:
+            row.target_model = payload.target_model.strip()
+        if payload.provider is not None:
+            row.provider = payload.provider.strip().lower()
+        if payload.price_per_1k_tokens is not None:
+            row.price_per_1k_tokens = float(payload.price_per_1k_tokens)
+        if payload.external_price_per_1k_tokens is not None:
+            row.external_price_per_1k_tokens = float(payload.external_price_per_1k_tokens)
+        if payload.markup_percent is not None:
+            row.markup_percent = float(payload.markup_percent)
+        if payload.is_active is not None:
+            row.is_active = payload.is_active
+        db.commit()
+        db.refresh(row)
+        return _model_item_from_row(row)
 
 
 @app.get("/gateway/balance", response_model=GatewayBalanceResponse)
@@ -778,37 +946,38 @@ def gateway_tokens_topup(payload: GatewayTopUpRequest, user: GatewayUser = Depen
 
 @app.post("/gateway/generate", response_model=GatewayGenerateResponse)
 def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depends(_get_gateway_user)):
-    model_def = resolve_gateway_model(payload.model_id)
-    if not model_def:
-        raise HTTPException(status_code=404, detail=f"Unknown model_id: {payload.model_id}")
-
     prompt = payload.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
     messages = [{"role": "user", "content": prompt}]
 
     with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
+        model_row = _resolve_model_for_request(db, payload.model_id)
+        provider = model_row.provider
+        upstream_model = model_row.target_model
+        model_key = model_row.model_key
         user_row = db.query(GatewayUser).filter(GatewayUser.id == user.id, GatewayUser.is_active.is_(True)).first()
         if not user_row:
             raise HTTPException(status_code=401, detail="Gateway user inactive")
 
         try:
-            if model_def.provider == "ollama":
-                content = run_chat_mode(client=client, model=model_def.upstream_model, prompt=prompt)
+            if provider == "ollama":
+                content = run_chat_mode(client=client, model=upstream_model, prompt=prompt)
                 prompt_tokens = estimate_messages_tokens(messages)
                 completion_tokens = estimate_text_tokens(content)
                 total_tokens = prompt_tokens + completion_tokens
-            elif model_def.provider == "openai":
+            elif provider == "openai":
                 content, prompt_tokens, completion_tokens, total_tokens = call_openai_proxy(
-                    model=model_def.upstream_model,
+                    model=upstream_model,
                     messages=messages,
                     temperature=payload.temperature,
                     max_tokens=payload.max_tokens,
                 )
             else:
-                raise RuntimeError(f"Unsupported provider: {model_def.provider}")
+                raise RuntimeError(f"Unsupported provider: {provider}")
 
-            cost_tokens = compute_token_charge(total_tokens, model_def.cost_per_1k_tokens)
+            cost_tokens = _charge_for_model(total_tokens, model_row)
             if user_row.tokens_balance < cost_tokens:
                 raise HTTPException(
                     status_code=402,
@@ -819,11 +988,22 @@ def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depend
                 )
 
             user_row.tokens_balance -= cost_tokens
+            _log_balance_audit(
+                db=db,
+                user_id=user_row.id,
+                action="model_request_charge",
+                delta_tokens=-int(cost_tokens),
+                balance_before=int(user_row.tokens_balance) + int(cost_tokens),
+                balance_after=int(user_row.tokens_balance),
+                actor="system",
+                actor_reference=provider,
+                reason=f"Charge for {model_key}",
+            )
             db.add(
                 GatewayUsageLog(
                     user_id=user_row.id,
-                    model_key=model_def.model_id,
-                    provider=model_def.provider,
+                    model_key=model_key,
+                    provider=provider,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
@@ -835,8 +1015,8 @@ def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depend
             db.refresh(user_row)
 
             return GatewayGenerateResponse(
-                provider=model_def.provider,
-                model_id=model_def.model_id,
+                provider=provider,
+                model_id=model_key,
                 answer=content,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -850,8 +1030,8 @@ def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depend
             db.add(
                 GatewayUsageLog(
                     user_id=user_row.id,
-                    model_key=model_def.model_id,
-                    provider=model_def.provider,
+                    model_key=model_key,
+                    provider=provider,
                     prompt_tokens=0,
                     completion_tokens=0,
                     total_tokens=0,
@@ -868,11 +1048,9 @@ def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depend
 def openai_compatible_models(user: GatewayUser = Depends(_get_gateway_user_from_bearer)):
     _ = user
     with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
         rows = db.query(GatewayModel).filter(GatewayModel.is_active.is_(True)).order_by(GatewayModel.id.asc()).all()
-    if rows:
-        model_ids = [row.model_key for row in rows]
-    else:
-        model_ids = [item.model_id for item in get_gateway_models()]
+    model_ids = [row.model_key for row in rows]
     return {
         "object": "list",
         "data": [
