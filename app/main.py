@@ -279,6 +279,9 @@ def _verify_gateway_admin_key(user: GatewayUser = Depends(_get_gateway_user)) ->
 def _verify_gateway_user_password(user: GatewayUser, password: str) -> bool:
     if not user.password_hash:
         return False
+    if "$" not in user.password_hash:
+        # Legacy rows were saved without salt; they should be reset via re-registration.
+        return False
     parts = user.password_hash.split("$", 1)
     if len(parts) != 2:
         return False
@@ -591,6 +594,26 @@ def gateway_register(payload: GatewayUserRegisterRequest):
         _ensure_catalog_seeded(db)
         exists = db.query(GatewayUser).filter(GatewayUser.email == email).first()
         if exists:
+            if "$" not in (exists.password_hash or ""):
+                # Recover legacy account: old rows stored digest without salt, so login cannot validate them.
+                if not exists.api_key:
+                    new_key, _, _, _ = generate_api_key()
+                    exists.api_key = new_key
+                exists.password_hash = password_hash
+                exists.is_active = True
+                if _is_admin_email(email):
+                    exists.role = "admin"
+                db.commit()
+                db.refresh(exists)
+                return GatewayUserResponse(
+                    user_id=exists.id,
+                    email=exists.email,
+                    api_key=exists.api_key,
+                    role=exists.role,
+                    token_balance=exists.tokens_balance,
+                    tariff_code=exists.plan,
+                    is_active=exists.is_active,
+                )
             raise HTTPException(status_code=409, detail="Email already registered")
         role = "admin" if _is_admin_email(email) else "user"
         user = GatewayUser(
@@ -622,7 +645,14 @@ def gateway_login(payload: GatewayLoginRequest):
     with SessionLocal() as db:
         _ensure_catalog_seeded(db)
         user = db.query(GatewayUser).filter(GatewayUser.email == email).first()
-        if not user or not _verify_gateway_user_password(user, payload.password):
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        if "$" not in (user.password_hash or ""):
+            raise HTTPException(
+                status_code=409,
+                detail="Legacy account detected. Re-register with the same email to reset your password.",
+            )
+        if not _verify_gateway_user_password(user, payload.password):
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if not user.is_active:
             raise HTTPException(status_code=403, detail="Gateway user is inactive")
