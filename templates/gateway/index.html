@@ -3,74 +3,100 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Gateway</title>
+  <title>AI Gateway — главная</title>
   <style>
+    :root {
+      --bg: #030712;
+      --card: #111827;
+      --line: #334155;
+      --muted: #94a3b8;
+      --text: #e5e7eb;
+      --primary: #2563eb;
+      --secondary: #374151;
+      --input: #0b1220;
+    }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      background: #030712;
-      color: #e5e7eb;
+      background: var(--bg);
+      color: var(--text);
     }
     .container {
-      max-width: 900px;
+      max-width: 980px;
       margin: 0 auto;
-      padding: 28px 16px 52px;
+      padding: 24px 16px 56px;
     }
     .card {
-      background: #111827;
-      border: 1px solid #1f2937;
+      background: var(--card);
+      border: 1px solid var(--line);
       border-radius: 12px;
       padding: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
+    }
+    .muted { color: var(--muted); }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
     }
     a.button {
       display: inline-block;
       text-decoration: none;
       border-radius: 8px;
-      background: #2563eb;
+      border: 0;
+      background: var(--primary);
       color: #fff;
       padding: 10px 14px;
       font-weight: 700;
-      margin-right: 8px;
-      margin-bottom: 8px;
     }
-    .muted {
-      color: #94a3b8;
+    a.button.secondary {
+      background: var(--secondary);
     }
     ul {
-      margin: 8px 0 0;
+      margin: 10px 0 0;
       padding-left: 18px;
+      line-height: 1.5;
+    }
+    a.link {
+      color: #93c5fd;
+      text-decoration: none;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>AI Gateway</h1>
-    <p class="muted">Навигационная страница. Регистрация, авторизация, пользовательские и админ-страницы вынесены отдельно.</p>
+    <p class="muted">
+      Единый вход в сервис. После авторизации вы перейдете в личный кабинет пользователя
+      или администратора (по вашей роли).
+    </p>
 
     <section class="card">
-      <h2>Вход в сервис</h2>
-      <a class="button" href="/gateway/register">Страница регистрации</a>
-      <a class="button" href="/gateway/login">Страница авторизации</a>
-      <p class="muted">После авторизации откройте нужный кабинет.</p>
+      <h2>Вход в систему</h2>
+      <div class="actions">
+        <a class="button" href="/gateway/register">Регистрация</a>
+        <a class="button secondary" href="/gateway/login">Авторизация</a>
+      </div>
     </section>
 
     <section class="card">
-      <h2>Пользовательские страницы</h2>
+      <h2>Разделы пользователя</h2>
       <ul>
-        <li><a href="/gateway/profile">Профиль (баланс + краткая карточка)</a></li>
-        <li><a href="/gateway/models">Доступные модели</a></li>
-        <li><a href="/gateway/history">История запросов</a></li>
-        <li><a href="/gateway/finance">Финансовые операции</a></li>
+        <li><a class="link" href="/gateway/profile">Профиль и баланс</a></li>
+        <li><a class="link" href="/gateway/models/page">Доступные модели</a></li>
+        <li><a class="link" href="/gateway/history">История запросов</a></li>
+        <li><a class="link" href="/gateway/finance">Финансовые операции</a></li>
       </ul>
     </section>
 
     <section class="card">
-      <h2>Администратор</h2>
+      <h2>Разделы администратора</h2>
       <ul>
-        <li><a href="/gateway/admin/users/ui">Пользователи</a></li>
-        <li><a href="/gateway/admin/models/ui">Модели и цены</a></li>
-        <li><a href="/gateway/admin/finance/ui">Финансовые операции</a></li>
+        <li><a class="link" href="/gateway/admin/users/ui">Пользователи</a></li>
+        <li><a class="link" href="/gateway/admin/models/ui">Модели и цены</a></li>
+        <li><a class="link" href="/gateway/admin/finance/ui">Финансовые операции</a></li>
       </ul>
     </section>
   </div>

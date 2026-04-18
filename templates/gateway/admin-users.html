@@ -3,14 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gateway Admin Users</title>
+  <title>Администратор — Пользователи</title>
   <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
-    .container { max-width: 1240px; margin: 0 auto; padding: 24px 16px 56px; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px 56px; }
+    .header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-    label { display: block; margin-top: 8px; color: #cbd5e1; }
+    .inline-group { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .nav a, .nav button { text-decoration:none; border:1px solid #334155; border-radius:8px; padding:8px 10px; color:#e2e8f0; background:#0b1220; }
+    .nav a.active { background:#2563eb; border-color:#2563eb; color:#fff; }
+    label { display: block; margin-top: 8px; color: #cbd5e1; font-size:14px; }
     input, button, select { width: 100%; margin-top: 6px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px 12px; }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"] { -moz-appearance: textfield; appearance:textfield; }
     button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
     button.inline { width: auto; padding: 6px 10px; margin: 0; font-size: 12px; }
     button.secondary { background: #374151; }
@@ -18,17 +27,22 @@
     th, td { border: 1px solid #334155; padding: 8px; text-align: left; vertical-align: top; }
     th { background: #0b1220; color: #cbd5e1; }
     pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
-    .inline-group { display: flex; gap: 8px; align-items: center; }
     .small { color: #94a3b8; font-size: 12px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Админ: пользователи</h1>
-    <p class="small">Управление пользователями: роль, баланс, активность, удаление.</p>
-    <div class="inline-group">
-      <button class="secondary" onclick="location.href='/gateway/admin'">Назад</button>
-      <button class="secondary" onclick="location.href='/gateway'">Выйти</button>
+    <div class="header">
+      <div>
+        <h1>Администратор — Пользователи</h1>
+        <p class="small">Управление ролью, балансом, активностью и удалением.</p>
+      </div>
+      <div class="inline-group nav">
+        <a href="/gateway/admin">Обзор</a>
+        <a href="/gateway/admin/users/ui" class="active">Пользователи</a>
+        <a href="/gateway/admin/finance/ui">Финансы</a>
+        <button id="logoutBtn" class="secondary">Выйти</button>
+      </div>
     </div>
     <section class="card">
       <div class="grid">
@@ -42,7 +56,7 @@
         </div>
       </div>
       <label><input id="includeInactiveInput" type="checkbox" style="width:auto; margin-right:8px;" />Показывать неактивных</label>
-      <button id="loadBtn">Загрузить пользователей</button>
+      <button id="loadBtn">Поиск</button>
       <div id="tableWrap"></div>
     </section>
     <section class="card">
@@ -84,40 +98,35 @@
       wrap.style.gap = "6px";
 
       const role = document.createElement("select");
-      ["user", "admin"].forEach((r) => {
+      [["user","Пользователь"], ["admin","Администратор"]].forEach(([r, label]) => {
         const option = document.createElement("option");
         option.value = r;
-        option.textContent = r;
+        option.textContent = label;
         if (r === user.role) option.selected = true;
         role.appendChild(option);
       });
 
       const addTokens = document.createElement("input");
-      addTokens.type = "number";
-      addTokens.placeholder = "add_tokens";
+      addTokens.type = "text";
+      addTokens.placeholder = "Изменение баланса (токены)";
       addTokens.value = "0";
       addTokens.style.margin = "0";
-
-      const reason = document.createElement("input");
-      reason.type = "text";
-      reason.placeholder = "reason";
-      reason.style.margin = "0";
+      addTokens.setAttribute("inputmode", "numeric");
 
       const active = document.createElement("label");
       active.className = "small";
-      active.innerHTML = `<input type="checkbox" ${user.is_active ? "checked" : ""} style="width:auto; margin-right:8px;" />active`;
+      active.innerHTML = `<input type="checkbox" ${user.is_active ? "checked" : ""} style="width:auto; margin-right:8px;" />Активен`;
       const activeInput = active.querySelector("input");
 
       const updateBtn = document.createElement("button");
       updateBtn.className = "inline";
-      updateBtn.textContent = "Update";
+      updateBtn.textContent = "Сохранить";
       updateBtn.onclick = async () => {
         try {
           const payload = {
             role: role.value,
             is_active: activeInput.checked,
             add_tokens: Number(addTokens.value || "0"),
-            balance_reason: reason.value.trim() || undefined,
           };
           if (payload.add_tokens === 0) delete payload.add_tokens;
           const result = await apiFetch(`/gateway/admin/users/${user.user_id}`, {
@@ -134,7 +143,7 @@
 
       const usageBtn = document.createElement("button");
       usageBtn.className = "inline secondary";
-      usageBtn.textContent = "Usage";
+      usageBtn.textContent = "История запросов";
       usageBtn.onclick = async () => {
         try {
           const result = await apiFetch(`/gateway/admin/users/${user.user_id}/usage?limit=100`);
@@ -146,7 +155,7 @@
 
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "inline secondary";
-      deleteBtn.textContent = "Delete";
+      deleteBtn.textContent = "Удалить";
       deleteBtn.onclick = async () => {
         if (!confirm(`Удалить пользователя ${user.email}?`)) return;
         try {
@@ -160,7 +169,6 @@
 
       wrap.appendChild(role);
       wrap.appendChild(addTokens);
-      wrap.appendChild(reason);
       wrap.appendChild(active);
       wrap.appendChild(updateBtn);
       wrap.appendChild(usageBtn);
@@ -183,7 +191,7 @@
         const wrap = document.getElementById("tableWrap");
         wrap.innerHTML = "";
         const table = document.createElement("table");
-        table.innerHTML = "<thead><tr><th>ID / email</th><th>role / balance</th><th>actions</th></tr></thead><tbody></tbody>";
+        table.innerHTML = "<thead><tr><th>ID / Email</th><th>Роль / Баланс</th><th>Действия</th></tr></thead><tbody></tbody>";
         const tbody = table.querySelector("tbody");
         data.users.forEach((u) => {
           const row = document.createElement("tr");
@@ -205,6 +213,11 @@
     }
 
     document.getElementById("loadBtn").addEventListener("click", loadUsers);
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem(API_KEY_STORAGE);
+      localStorage.removeItem("gateway_user_role");
+      window.location.href = "/gateway/login";
+    });
     loadUsers();
   </script>
 </body>

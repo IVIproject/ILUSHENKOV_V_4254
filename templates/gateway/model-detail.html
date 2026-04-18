@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gateway - Модель</title>
+  <title>AI Gateway — Модель</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #0b1220; color: #e2e8f0; }
-    .container { max-width: 980px; margin: 0 auto; padding: 20px 14px 40px; }
-    .header { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
+    .container { max-width: 980px; margin: 0 auto; padding: 24px 16px 56px; }
+    .header { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
     .nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 18px; }
-    .nav a { color: #bfdbfe; text-decoration: none; border: 1px solid #1e3a8a; border-radius: 8px; padding: 6px 10px; background: #111827; }
+    .nav a { color: #e2e8f0; text-decoration: none; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; background: #0b1220; }
     .card { background: #111827; border: 1px solid #334155; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
     input, textarea, button {
       width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0;
@@ -32,7 +32,7 @@
     </div>
     <nav class="nav">
       <a href="/gateway/profile">Профиль</a>
-      <a href="/gateway/models">Модели</a>
+      <a href="/gateway/models/page">Модели</a>
       <a href="/gateway/history">История запросов</a>
       <a href="/gateway/finance">Финансовые операции</a>
     </nav>
@@ -64,7 +64,7 @@
     }
 
     function getModelIdFromPath() {
-      const prefix = "/gateway/models/";
+      const prefix = "/gateway/model/";
       const path = window.location.pathname;
       if (!path.startsWith(prefix)) return "";
       return decodeURIComponent(path.slice(prefix.length));
@@ -83,7 +83,7 @@
 
     async function apiFetch(url, options = {}) {
       const key = getApiKey();
-      if (!key) throw new Error("API key not found. Login again.");
+      if (!key) throw new Error("API-ключ не найден. Выполните вход заново.");
       const headers = Object.assign({}, options.headers || {}, { "X-Gateway-Key": key });
       const response = await fetch(url, Object.assign({}, options, { headers }));
       return parseResponse(response);
@@ -94,10 +94,10 @@
     async function loadModelInfo() {
       try {
         currentModel = getModelIdFromPath();
-        if (!currentModel) throw new Error("Model ID not found in URL");
+        if (!currentModel) throw new Error("Идентификатор модели не найден в адресе страницы");
         const data = await apiFetch("/gateway/models");
         const item = (data.models || []).find((m) => m.model_id === currentModel);
-        if (!item) throw new Error("Model not found in catalog");
+        if (!item) throw new Error("Модель не найдена в каталоге");
         document.getElementById("pageTitle").textContent = item.display_name || item.model_id;
         setText("modelInfo", {
           model_id: item.model_id,
@@ -143,6 +143,7 @@
 
     function logout() {
       localStorage.removeItem(API_KEY_STORAGE);
+      localStorage.removeItem("gateway_user_role");
       window.location.href = "/gateway/login";
     }
 

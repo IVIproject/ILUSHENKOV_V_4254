@@ -5,26 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Профиль пользователя</title>
   <style>
+    :root { color-scheme: dark; }
     body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
-    .container { max-width: 980px; margin: 0 auto; padding: 24px 16px 56px; }
-    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
-    .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-    .nav a, .nav button { text-decoration: none; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
-    pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
+    .container { max-width: 980px; margin: 0 auto; padding: 26px 16px 56px; }
+    .header { margin-bottom: 14px; }
     .muted { color: #94a3b8; }
+    .menu { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .menu a, .menu button {
+      text-decoration: none; border: 1px solid #334155; background: #0b1220; color: #e2e8f0;
+      border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 14px;
+    }
+    .menu a.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; }
+    pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
+    button {
+      margin-top: 10px; border: 0; border-radius: 8px; background: #2563eb; color: #fff;
+      padding: 10px 12px; font-weight: 700; cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Профиль пользователя</h1>
-    <p class="muted">Баланс и быстрые переходы к моделям, истории и операциям.</p>
-    <div class="nav">
-      <a href="/gateway/models">Доступные модели</a>
+    <div class="header">
+      <h1>Профиль пользователя</h1>
+      <p class="muted">Ваш баланс и роль в системе.</p>
+    </div>
+    <div class="menu">
+      <a href="/gateway/profile" class="active">Профиль</a>
+      <a href="/gateway/models/page">Модели</a>
       <a href="/gateway/history">История запросов</a>
       <a href="/gateway/finance">Финансовые операции</a>
       <button id="logoutBtn">Выйти</button>
     </div>
     <section class="card">
+      <h2>Информация профиля</h2>
       <button id="refreshBtn">Обновить профиль</button>
       <pre id="profileOut"></pre>
     </section>
@@ -36,7 +50,7 @@
     async function parseResponse(response) {
       const raw = await response.text();
       let data; try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${data.detail || raw || "Request failed"}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${data.detail || raw || "Ошибка запроса"}`);
       return data;
     }
     async function apiFetch(url, options = {}) {
