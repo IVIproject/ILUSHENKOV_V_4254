@@ -80,10 +80,15 @@ curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"domains","payload":{"business_context":"регистрация доменов и хостинг","keywords":["domain","cloud"],"zone":".ru","count":5}}'
 
-# 3) php_page
+# 3) php_page (inline template)
 curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"php_page","payload":{"template_html":"<html><body><h1>Услуга</h1><div>{{content}}</div></body></html>","content_prompt":"Подготовь текст для страницы услуги VPS"}}'
+
+# 3b) php_page (template from repository folder)
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"php_page","payload":{"template_name":"hosting.php","content_prompt":"Сделай текст для страницы хостинга с акцентом на надежность и поддержку"}}'
 
 # 4) support_faq
 curl -X POST "http://127.0.0.1:8080/mode/run" \
@@ -111,6 +116,15 @@ curl -X POST "http://127.0.0.1:8080/support/dialogs/import" \
 curl -X POST "http://127.0.0.1:8080/generate" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Suggest 3 domain names for an IT service"}'
+```
+
+Template file generation example (download `.php` file):
+
+```bash
+curl -X POST "http://127.0.0.1:8080/page-template/generate-file" \
+  -H "Content-Type: application/json" \
+  -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст страницы хостинга","output_filename":"hosting-generated.php"}' \
+  --output hosting-generated.php
 ```
 
 - Domain names generation (business endpoint):

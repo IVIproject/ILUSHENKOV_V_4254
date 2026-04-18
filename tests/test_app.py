@@ -159,6 +159,41 @@ def test_mode_php_template():
     assert "{{content}}" not in output
 
 
+def test_mode_php_page_by_template_name():
+    r = client.post(
+        "/mode/run",
+        json={
+            "mode": "php_page",
+            "payload": {
+                "template_name": "hosting",
+                "content_prompt": "Подготовь продающий текст для страницы хостинга",
+            },
+        },
+    )
+    assert r.status_code == 200
+    result = r.json()["result"]
+    assert "php_page" in result
+    assert "template_name" in result
+    assert result["template_name"] == "hosting"
+    assert "{{AI_HERO_TITLE}}" not in result["php_page"]
+
+
+def test_page_template_generate_file():
+    r = client.post(
+        "/page-template/generate-file",
+        json={
+            "template_name": "hosting",
+            "content_prompt": "Сделай текст лендинга хостинга",
+            "output_filename": "generated-hosting.php",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-httpd-php")
+    disposition = r.headers.get("content-disposition", "")
+    assert "generated-hosting.php" in disposition
+    assert "<?" in r.text
+
+
 def test_faq_import_and_support_mode():
     _clear_faq_table()
     items = [

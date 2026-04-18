@@ -1,6 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -48,6 +49,33 @@ def _save_log(prompt: str, answer: str) -> None:
     with SessionLocal() as db:
         db.add(RequestLog(prompt=prompt, answer=answer))
         db.commit()
+
+
+def _resolve_template_path(template_name: str) -> Path:
+    safe = template_name.replace("\\", "/").split("/")[-1].strip()
+    if not safe:
+        raise HTTPException(status_code=400, detail="template_name is required")
+    if not safe.endswith(".php"):
+        safe += ".php"
+    if not all(ch.isalnum() or ch in "._-" for ch in safe):
+        raise HTTPException(status_code=400, detail="Invalid template_name")
+    template_path = Path("templates/pages") / safe
+    if not template_path.exists() or not template_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Template not found: {safe}")
+    return template_path
+
+
+def _generate_php_from_template_name(template_name: str, content_prompt: str) -> tuple[str, str]:
+    template_path = _resolve_template_path(template_name)
+    template_text = template_path.read_text(encoding="utf-8")
+    generated_php = generate_hosting_page_from_template(
+        client=client,
+        model=settings.ollama_model,
+        template_text=template_text,
+        content_prompt=content_prompt,
+    )
+    output_name = f"{template_path.stem}-generated.php"
+    return generated_php, output_name
 
 
 @asynccontextmanager
@@ -251,21 +279,12 @@ def ask_support_faq(payload: SupportFaqAskRequest):
 @app.post("/page-template/generate-file")
 def generate_page_from_template(payload: PageTemplateGenerateRequest):
     try:
-        template_dir = Path("templates/pages")
-        template_path = template_dir / payload.template_name
-        if not template_path.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Template not found: {payload.template_name}",
-            )
-        template_text = template_path.read_text(encoding="utf-8")
-        generated_php = generate_hosting_page_from_template(
-            client=client,
-            model=settings.ollama_model,
-            template_text=template_text,
+        generated_php, output_name = _generate_php_from_template_name(
+            template_name=payload.template_name,
             content_prompt=payload.content_prompt,
         )
-        output_name = payload.output_filename
+        if payload.output_filename:
+            output_name = payload.output_filename
         if not output_name.endswith(".php"):
             output_name += ".php"
         return StreamingResponse(
@@ -343,13 +362,35 @@ def run_mode(payload: ModeRunRequest, request: Request):
             return ModeRunResponse(mode=mode, result={"suggestions": suggestions, "zone": zone})
 
         if mode == "php_page":
+            template_name = str(data.get("template_name", "")).strip()
             template_html = str(data.get("template_html", ""))
             content_prompt = str(data.get("content_prompt", "")).strip()
-            if not template_html or not content_prompt:
+            if not content_prompt:
                 raise HTTPException(
                     status_code=400,
-                    detail="payload.template_html and payload.content_prompt are required for php_page mode",
+                    detail="payload.content_prompt is required for php_page mode",
                 )
+            if template_name:
+                rendered, output_name = _generate_php_from_template_name(
+                    template_name=template_name,
+                    content_prompt=content_prompt,
+                )
+                _save_log(prompt=content_prompt, answer=rendered)
+                return ModeRunResponse(
+                    mode=mode,
+                    result={
+                        "php_page": rendered,
+                        "template_name": template_name,
+                        "output_filename": output_name,
+                    },
+                )
+
+            if not template_html:
+                raise HTTPException(
+                    status_code=400,
+                    detail="payload.template_name or payload.template_html is required for php_page mode",
+                )
+
             rendered = render_php_template(
                 client=client,
                 model=settings.ollama_model,
