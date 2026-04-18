@@ -5,24 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Gateway</title>
   <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #030712;
-      color: #e5e7eb;
-    }
-    .container {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 28px 16px 52px;
-    }
-    .card {
-      background: #111827;
-      border: 1px solid #1f2937;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
+    body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
+    .container { max-width: 760px; margin: 0 auto; padding: 48px 16px 56px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 18px; }
+    h1 { margin: 0 0 8px; }
+    p { margin: 0; }
+    .muted { color: #94a3b8; margin-top: 8px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
     a.button {
       display: inline-block;
       text-decoration: none;
@@ -31,47 +20,20 @@
       color: #fff;
       padding: 10px 14px;
       font-weight: 700;
-      margin-right: 8px;
-      margin-bottom: 8px;
     }
-    .muted {
-      color: #94a3b8;
-    }
-    ul {
-      margin: 8px 0 0;
-      padding-left: 18px;
-    }
+    a.button.secondary { background: #374151; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>AI Gateway</h1>
-    <p class="muted">Навигационная страница. Регистрация, авторизация, пользовательские и админ-страницы вынесены отдельно.</p>
-
     <section class="card">
-      <h2>Вход в сервис</h2>
-      <a class="button" href="/gateway/register">Страница регистрации</a>
-      <a class="button" href="/gateway/login">Страница авторизации</a>
-      <p class="muted">После авторизации откройте нужный кабинет.</p>
-    </section>
-
-    <section class="card">
-      <h2>Пользовательские страницы</h2>
-      <ul>
-        <li><a href="/gateway/profile">Профиль (баланс + краткая карточка)</a></li>
-        <li><a href="/gateway/models">Доступные модели</a></li>
-        <li><a href="/gateway/history">История запросов</a></li>
-        <li><a href="/gateway/finance">Финансовые операции</a></li>
-      </ul>
-    </section>
-
-    <section class="card">
-      <h2>Администратор</h2>
-      <ul>
-        <li><a href="/gateway/admin/users/ui">Пользователи</a></li>
-        <li><a href="/gateway/admin/models/ui">Модели и цены</a></li>
-        <li><a href="/gateway/admin/finance/ui">Финансовые операции</a></li>
-      </ul>
+      <h1>AI Gateway</h1>
+      <p>Регистрация и вход в личный кабинет.</p>
+      <p class="muted">После авторизации вы автоматически попадете в профиль или в админ-раздел.</p>
+      <div class="actions">
+        <a class="button" href="/gateway/register">Регистрация</a>
+        <a class="button secondary" href="/gateway/login">Войти</a>
+      </div>
     </section>
   </div>
 </body>

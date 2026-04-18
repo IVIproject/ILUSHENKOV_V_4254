@@ -32,7 +32,7 @@
     </div>
     <nav class="nav">
       <a href="/gateway/profile">Профиль</a>
-      <a href="/gateway/models">Модели</a>
+      <a href="/gateway/models/page">Модели</a>
       <a href="/gateway/history">История запросов</a>
       <a href="/gateway/finance">Финансовые операции</a>
     </nav>
@@ -64,7 +64,7 @@
     }
 
     function getModelIdFromPath() {
-      const prefix = "/gateway/models/";
+      const prefix = "/gateway/model/";
       const path = window.location.pathname;
       if (!path.startsWith(prefix)) return "";
       return decodeURIComponent(path.slice(prefix.length));

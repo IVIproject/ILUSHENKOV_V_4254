@@ -382,6 +382,65 @@ def test_gateway_login_me_and_usage():
     assert items[0]["tokens_spent"] >= 1
 
 
+def test_gateway_login_reports_legacy_password_format():
+    _clear_faq_table()
+    with main_module.SessionLocal() as db:
+        db.add(
+            GatewayUser(
+                email="legacy-login@example.com",
+                password_hash="legacyhashwithoutseparator",
+                api_key="asv_legacy_login_key",
+                role="user",
+                plan="starter",
+                tokens_balance=100,
+                is_active=True,
+            )
+        )
+        db.commit()
+
+    login = client.post(
+        "/gateway/login",
+        json={"email": "legacy-login@example.com", "password": "strong-pass-123"},
+    )
+    assert login.status_code == 409
+    assert "Legacy account detected" in login.json()["detail"]
+
+
+def test_gateway_register_recovers_legacy_account():
+    _clear_faq_table()
+    with main_module.SessionLocal() as db:
+        db.add(
+            GatewayUser(
+                email="legacy-register@example.com",
+                password_hash="legacyhashwithoutseparator",
+                api_key="asv_legacy_register_key",
+                role="user",
+                plan="starter",
+                tokens_balance=777,
+                is_active=False,
+            )
+        )
+        db.commit()
+
+    register = client.post(
+        "/gateway/register",
+        json={"email": "legacy-register@example.com", "password": "strong-pass-123"},
+    )
+    assert register.status_code == 200
+    payload = register.json()
+    assert payload["email"] == "legacy-register@example.com"
+    assert payload["is_active"] is True
+    assert payload["token_balance"] == 777
+    assert payload["api_key"] == "asv_legacy_register_key"
+
+    login = client.post(
+        "/gateway/login",
+        json={"email": "legacy-register@example.com", "password": "strong-pass-123"},
+    )
+    assert login.status_code == 200
+    assert login.json()["user_id"] == payload["user_id"]
+
+
 def test_gateway_balance_audit_user_and_admin():
     _clear_faq_table()
     previous_gateway_emails = main_module.settings.gateway_admin_emails
