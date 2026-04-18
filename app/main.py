@@ -494,18 +494,12 @@ def gateway_admin_page():
 
 @app.get("/gateway/admin/users/ui", response_class=HTMLResponse)
 def gateway_admin_users_page():
-    page = Path("templates/gateway/admin-users.html")
-    if not page.exists():
-        raise HTTPException(status_code=404, detail="Gateway admin users page not found")
-    return page.read_text(encoding="utf-8")
+    return RedirectResponse(url="/gateway/admin", status_code=307)
 
 
 @app.get("/gateway/admin/models/ui", response_class=HTMLResponse)
 def gateway_admin_models_page():
-    page = Path("templates/gateway/admin-models.html")
-    if not page.exists():
-        raise HTTPException(status_code=404, detail="Gateway admin models page not found")
-    return page.read_text(encoding="utf-8")
+    return RedirectResponse(url="/gateway/admin", status_code=307)
 
 
 

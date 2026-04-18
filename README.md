@@ -90,9 +90,7 @@ Notes:
 - `http://127.0.0.1:8080/gateway/models/page` -> models list
 - `http://127.0.0.1:8080/gateway/model/{model_id}` -> model details + request form
 - `http://127.0.0.1:8080/gateway/history` -> request history
-- `http://127.0.0.1:8080/gateway/admin` -> admin section
-- `http://127.0.0.1:8080/gateway/admin/users/ui` -> user management
-- `http://127.0.0.1:8080/gateway/admin/models/ui` -> model management
+- `http://127.0.0.1:8080/gateway/admin` -> unified admin section (users + models on one page)
 
 All pages use a shared menu. For admin users, menu includes `Управление`.
 
