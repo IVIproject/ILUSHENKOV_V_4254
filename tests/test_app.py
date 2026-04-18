@@ -140,42 +140,19 @@ def test_mode_domains_list():
     assert all(" " not in x for x in out)
 
 
-def test_mode_php_template():
-    template = "<html><body><h1>{{title}}</h1><p>{{content}}</p></body></html>"
+def test_mode_php_page_removed_from_mode_runner():
     r = client.post(
         "/mode/run",
         json={
             "mode": "php_page",
             "payload": {
                 "content_prompt": "Услуга VPS-хостинга",
-                "template_html": template,
+                "template_html": "<html></html>",
             },
         },
     )
-    assert r.status_code == 200
-    output = r.json()["result"]["php_page"]
-    assert "<html>" in output
-    assert "{{content}}" not in output
-    assert "{{content}}" not in output
-
-
-def test_mode_php_page_by_template_name():
-    r = client.post(
-        "/mode/run",
-        json={
-            "mode": "php_page",
-            "payload": {
-                "template_name": "hosting",
-                "content_prompt": "Подготовь продающий текст для страницы хостинга",
-            },
-        },
-    )
-    assert r.status_code == 200
-    result = r.json()["result"]
-    assert "php_page" in result
-    assert "template_name" in result
-    assert result["template_name"] == "hosting"
-    assert "{{AI_HERO_TITLE}}" not in result["php_page"]
+    assert r.status_code == 400
+    assert "POST /page-template/generate-file" in r.json()["detail"]
 
 
 def test_page_template_generate_file():

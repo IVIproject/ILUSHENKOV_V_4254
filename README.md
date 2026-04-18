@@ -64,7 +64,7 @@ Supported modes:
 
 1. `chat` - standard assistant response
 2. `domains` - domain list generation without numbering/comments
-3. `php_page` - content generation into provided page template
+3. `php_page` - template content generation (file output endpoint)
 4. `support_faq` - support response using imported FAQ history
 
 Mode examples:
@@ -80,12 +80,7 @@ curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"domains","payload":{"business_context":"регистрация доменов и хостинг","keywords":["domain","cloud"],"zone":".ru","count":5}}'
 
-# 3) php_page (inline template)
-curl -X POST "http://127.0.0.1:8080/mode/run" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"php_page","payload":{"template_html":"<html><body><h1>Услуга</h1><div>{{content}}</div></body></html>","content_prompt":"Подготовь текст для страницы услуги VPS"}}'
-
-# 3b) php_page (template from repository folder)
+# 3) php_page (template from repository folder only)
 curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"php_page","payload":{"template_name":"hosting.php","content_prompt":"Сделай текст для страницы хостинга с акцентом на надежность и поддержку"}}'
@@ -126,6 +121,8 @@ curl -X POST "http://127.0.0.1:8080/page-template/generate-file" \
   -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст страницы хостинга","output_filename":"hosting-generated.php"}' \
   --output hosting-generated.php
 ```
+
+Note: `php_page` mode now supports only named templates from `templates/pages/`.
 
 - Domain names generation (business endpoint):
 

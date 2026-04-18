@@ -362,43 +362,13 @@ def run_mode(payload: ModeRunRequest, request: Request):
             return ModeRunResponse(mode=mode, result={"suggestions": suggestions, "zone": zone})
 
         if mode == "php_page":
-            template_name = str(data.get("template_name", "")).strip()
-            template_html = str(data.get("template_html", ""))
-            content_prompt = str(data.get("content_prompt", "")).strip()
-            if not content_prompt:
-                raise HTTPException(
-                    status_code=400,
-                    detail="payload.content_prompt is required for php_page mode",
-                )
-            if template_name:
-                rendered, output_name = _generate_php_from_template_name(
-                    template_name=template_name,
-                    content_prompt=content_prompt,
-                )
-                _save_log(prompt=content_prompt, answer=rendered)
-                return ModeRunResponse(
-                    mode=mode,
-                    result={
-                        "php_page": rendered,
-                        "template_name": template_name,
-                        "output_filename": output_name,
-                    },
-                )
-
-            if not template_html:
-                raise HTTPException(
-                    status_code=400,
-                    detail="payload.template_name or payload.template_html is required for php_page mode",
-                )
-
-            rendered = render_php_template(
-                client=client,
-                model=settings.ollama_model,
-                template_html=template_html,
-                prompt=content_prompt,
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "php_page mode is disabled. "
+                    "Use POST /page-template/generate-file for file output."
+                ),
             )
-            _save_log(prompt=content_prompt, answer=rendered)
-            return ModeRunResponse(mode=mode, result={"php_page": rendered})
 
         if mode == "support_faq":
             question = str(data.get("question", "")).strip()
