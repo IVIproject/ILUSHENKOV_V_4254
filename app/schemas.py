@@ -255,6 +255,17 @@ class GatewayAdminModelUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+class GatewayAdminModelCreateRequest(BaseModel):
+    model_id: str = Field(..., min_length=3, max_length=128)
+    display_name: str = Field(..., min_length=2, max_length=255)
+    provider: str = Field(..., min_length=2, max_length=32)
+    target_model: str = Field(..., min_length=2, max_length=255)
+    price_per_1k_tokens: float = Field(default=1.0, ge=0.0, le=1_000_000.0)
+    external_price_per_1k_tokens: float | None = Field(default=None, ge=0.0, le=1_000_000.0)
+    markup_percent: float = Field(default=0.0, ge=0.0, le=10_000.0)
+    is_active: bool = True
+
+
 class GatewayCatalogResponse(BaseModel):
     models: list[GatewayModelItem]
 

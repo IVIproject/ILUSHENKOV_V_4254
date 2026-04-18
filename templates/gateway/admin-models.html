@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin: models</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
+    .container { max-width: 1240px; margin: 0 auto; padding: 20px 14px 40px; }
+    .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .nav button { text-decoration: none; color: #fff; border: 0; border-radius: 8px; padding: 8px 12px; background: #1d4ed8; cursor: pointer; font-weight: 700; }
+    .nav a.secondary, .nav button.secondary { background: #374151; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    label { display: block; margin-top: 8px; color: #cbd5e1; }
+    input, select, button, textarea {
+      width: 100%; margin-top: 6px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px 12px; box-sizing: border-box;
+    }
+    button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
+    button.inline { width: auto; margin: 0; padding: 6px 10px; font-size: 12px; }
+    button.secondary { background: #374151; }
+    pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #334155; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #0b1220; color: #cbd5e1; }
+    .small { font-size: 12px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>Админ: модели</h1>
+        <div class="small">Настройка цен, добавление новых моделей и удаление старых.</div>
+      </div>
+      <div class="nav">
+        <a href="/gateway/admin">Dashboard</a>
+        <a href="/gateway/admin/users/ui">Users</a>
+        <a href="/gateway/admin/models/ui">Models</a>
+        <a href="/gateway/admin/finance/ui">Finance</a>
+        <button id="logoutBtn" class="secondary">Выйти</button>
+      </div>
+    </div>
+
+    <section class="card">
+      <h2>Добавить новую модель</h2>
+      <div class="grid">
+        <div>
+          <label>model_id</label>
+          <input id="newModelId" placeholder="custom/my-model" />
+        </div>
+        <div>
+          <label>display_name</label>
+          <input id="newDisplayName" placeholder="My Model" />
+        </div>
+        <div>
+          <label>provider</label>
+          <select id="newProvider">
+            <option value="ollama">ollama</option>
+            <option value="openai">openai</option>
+          </select>
+        </div>
+        <div>
+          <label>target_model</label>
+          <input id="newTargetModel" placeholder="qwen2.5:3b or gpt-4o-mini" />
+        </div>
+        <div>
+          <label>price_per_1k_tokens</label>
+          <input id="newPrice" type="number" step="0.0001" value="1" />
+        </div>
+        <div>
+          <label>external_price_per_1k_tokens (optional)</label>
+          <input id="newExternalPrice" type="number" step="0.0001" placeholder="optional" />
+        </div>
+        <div>
+          <label>markup_percent</label>
+          <input id="newMarkup" type="number" step="0.1" value="0" />
+        </div>
+        <div>
+          <label>active</label>
+          <select id="newIsActive">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+      </div>
+      <button id="createModelBtn">Создать модель</button>
+      <pre id="createOut"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Существующие модели</h2>
+      <button id="loadModelsBtn">Обновить список</button>
+      <div id="modelsWrap"></div>
+    </section>
+  </div>
+
+  <script>
+    const API_KEY_STORAGE = "gateway_api_key";
+
+    function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ""; }
+    function setText(id, value) {
+      document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+    function logout() {
+      localStorage.removeItem(API_KEY_STORAGE);
+      window.location.href = "/gateway/login";
+    }
+    async function parseResponse(response) {
+      const raw = await response.text();
+      let data;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+      if (!response.ok) {
+        const detail = data && data.detail ? data.detail : raw || "Request failed";
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+      return data;
+    }
+    async function apiFetch(url, options = {}) {
+      const key = getApiKey();
+      if (!key) throw new Error("No API key, please login.");
+      const headers = Object.assign({}, options.headers || {}, { "X-Gateway-Key": key });
+      const response = await fetch(url, Object.assign({}, options, { headers }));
+      return parseResponse(response);
+    }
+
+    async function loadModels() {
+      try {
+        const data = await apiFetch("/gateway/admin/models");
+        const wrap = document.getElementById("modelsWrap");
+        wrap.innerHTML = "";
+        const table = document.createElement("table");
+        table.innerHTML = "<thead><tr><th>Model</th><th>Provider</th><th>Pricing</th><th>Actions</th></tr></thead><tbody></tbody>";
+        const tbody = table.querySelector("tbody");
+        data.models.forEach((m) => {
+          const row = document.createElement("tr");
+          const c1 = document.createElement("td");
+          c1.innerHTML = `<div><strong>${m.model_id}</strong></div><div class="small">${m.display_name}</div><div class="small">target: ${m.target_model}</div>`;
+          const c2 = document.createElement("td");
+          c2.textContent = `${m.provider} | ${m.is_active ? "active" : "inactive"}`;
+          const c3 = document.createElement("td");
+          c3.innerHTML = `<div>effective: ${m.price_per_1k_tokens}</div><div>external: ${m.external_price_per_1k_tokens ?? "-"}</div><div>markup: ${m.markup_percent ?? 0}%</div>`;
+          const c4 = document.createElement("td");
+
+          const panel = document.createElement("div");
+          panel.style.display = "grid";
+          panel.style.gap = "6px";
+
+          const displayName = document.createElement("input");
+          displayName.value = m.display_name;
+          const provider = document.createElement("input");
+          provider.value = m.provider;
+          const target = document.createElement("input");
+          target.value = m.target_model;
+          const price = document.createElement("input");
+          price.type = "number";
+          price.step = "0.0001";
+          price.value = m.price_per_1k_tokens;
+          const externalPrice = document.createElement("input");
+          externalPrice.type = "number";
+          externalPrice.step = "0.0001";
+          externalPrice.value = m.external_price_per_1k_tokens ?? "";
+          const markup = document.createElement("input");
+          markup.type = "number";
+          markup.step = "0.1";
+          markup.value = m.markup_percent ?? 0;
+          const isActive = document.createElement("select");
+          isActive.innerHTML = `<option value="true" ${m.is_active ? "selected" : ""}>true</option><option value="false" ${!m.is_active ? "selected" : ""}>false</option>`;
+
+          const saveBtn = document.createElement("button");
+          saveBtn.className = "inline";
+          saveBtn.textContent = "Save";
+          saveBtn.onclick = async () => {
+            try {
+              const payload = {
+                display_name: displayName.value.trim(),
+                provider: provider.value.trim(),
+                target_model: target.value.trim(),
+                price_per_1k_tokens: Number(price.value || "0"),
+                markup_percent: Number(markup.value || "0"),
+                is_active: isActive.value === "true"
+              };
+              if (externalPrice.value.trim() !== "") payload.external_price_per_1k_tokens = Number(externalPrice.value);
+              const out = await apiFetch(`/gateway/admin/models/${encodeURIComponent(m.model_id)}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+              setText("createOut", { updated: out });
+              loadModels();
+            } catch (error) {
+              setText("createOut", String(error));
+            }
+          };
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "inline secondary";
+          deleteBtn.textContent = "Delete";
+          deleteBtn.onclick = async () => {
+            const sure = confirm(`Удалить модель ${m.model_id}?`);
+            if (!sure) return;
+            try {
+              const out = await apiFetch(`/gateway/admin/models/${encodeURIComponent(m.model_id)}`, { method: "DELETE" });
+              setText("createOut", out);
+              loadModels();
+            } catch (error) {
+              setText("createOut", String(error));
+            }
+          };
+
+          panel.appendChild(displayName);
+          panel.appendChild(provider);
+          panel.appendChild(target);
+          panel.appendChild(price);
+          panel.appendChild(externalPrice);
+          panel.appendChild(markup);
+          panel.appendChild(isActive);
+          panel.appendChild(saveBtn);
+          panel.appendChild(deleteBtn);
+          c4.appendChild(panel);
+
+          row.appendChild(c1);
+          row.appendChild(c2);
+          row.appendChild(c3);
+          row.appendChild(c4);
+          tbody.appendChild(row);
+        });
+        wrap.appendChild(table);
+      } catch (error) {
+        setText("modelsWrap", String(error));
+      }
+    }
+
+    async function createModel() {
+      try {
+        const payload = {
+          model_id: document.getElementById("newModelId").value.trim(),
+          display_name: document.getElementById("newDisplayName").value.trim(),
+          provider: document.getElementById("newProvider").value.trim(),
+          target_model: document.getElementById("newTargetModel").value.trim(),
+          price_per_1k_tokens: Number(document.getElementById("newPrice").value || "0"),
+          markup_percent: Number(document.getElementById("newMarkup").value || "0"),
+          is_active: document.getElementById("newIsActive").value === "true"
+        };
+        const ext = document.getElementById("newExternalPrice").value.trim();
+        if (ext !== "") payload.external_price_per_1k_tokens = Number(ext);
+        const out = await apiFetch("/gateway/admin/models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        setText("createOut", { created: out });
+        loadModels();
+      } catch (error) {
+        setText("createOut", String(error));
+      }
+    }
+
+    function bind() {
+      document.getElementById("logoutBtn").addEventListener("click", logout);
+      document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
+      document.getElementById("createModelBtn").addEventListener("click", createModel);
+    }
+
+    async function boot() {
+      if (!getApiKey()) {
+        window.location.href = "/gateway/login";
+        return;
+      }
+      bind();
+      await loadModels();
+    }
+    boot();
+  </script>
+</body>
+</html>

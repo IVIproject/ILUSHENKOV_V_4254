@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gateway - Модель</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #0b1220; color: #e2e8f0; }
+    .container { max-width: 980px; margin: 0 auto; padding: 20px 14px 40px; }
+    .header { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 18px; }
+    .nav a { color: #bfdbfe; text-decoration: none; border: 1px solid #1e3a8a; border-radius: 8px; padding: 6px 10px; background: #111827; }
+    .card { background: #111827; border: 1px solid #334155; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+    input, textarea, button {
+      width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0;
+      padding: 10px 12px; margin-top: 6px; margin-bottom: 10px;
+    }
+    button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #374151; }
+    textarea { min-height: 120px; resize: vertical; }
+    pre { margin: 0; background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px; white-space: pre-wrap; min-height: 44px; }
+    .muted { color: #94a3b8; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 id="pageTitle">Модель</h1>
+      <div>
+        <button id="logoutBtn" class="secondary">Выйти</button>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="/gateway/profile">Профиль</a>
+      <a href="/gateway/models">Модели</a>
+      <a href="/gateway/history">История запросов</a>
+      <a href="/gateway/finance">Финансовые операции</a>
+    </nav>
+
+    <section class="card">
+      <h2>Описание модели</h2>
+      <pre id="modelInfo">Загрузка...</pre>
+    </section>
+
+    <section class="card">
+      <h2>Сделать запрос</h2>
+      <label>Промпт</label>
+      <textarea id="promptInput" placeholder="Введите запрос"></textarea>
+      <button id="estimateBtn" class="secondary">Оценить стоимость</button>
+      <pre id="estimateOut"></pre>
+      <button id="generateBtn">Отправить</button>
+      <pre id="generateOut"></pre>
+    </section>
+  </div>
+  <script>
+    const API_KEY_STORAGE = "gateway_api_key";
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    function getApiKey() {
+      return localStorage.getItem(API_KEY_STORAGE) || "";
+    }
+
+    function getModelIdFromPath() {
+      const prefix = "/gateway/models/";
+      const path = window.location.pathname;
+      if (!path.startsWith(prefix)) return "";
+      return decodeURIComponent(path.slice(prefix.length));
+    }
+
+    async function parseResponse(response) {
+      const raw = await response.text();
+      let data;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+      if (!response.ok) {
+        const detail = data && data.detail ? data.detail : raw || "Request failed";
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+      return data;
+    }
+
+    async function apiFetch(url, options = {}) {
+      const key = getApiKey();
+      if (!key) throw new Error("API key not found. Login again.");
+      const headers = Object.assign({}, options.headers || {}, { "X-Gateway-Key": key });
+      const response = await fetch(url, Object.assign({}, options, { headers }));
+      return parseResponse(response);
+    }
+
+    let currentModel = "";
+
+    async function loadModelInfo() {
+      try {
+        currentModel = getModelIdFromPath();
+        if (!currentModel) throw new Error("Model ID not found in URL");
+        const data = await apiFetch("/gateway/models");
+        const item = (data.models || []).find((m) => m.model_id === currentModel);
+        if (!item) throw new Error("Model not found in catalog");
+        document.getElementById("pageTitle").textContent = item.display_name || item.model_id;
+        setText("modelInfo", {
+          model_id: item.model_id,
+          display_name: item.display_name,
+          provider: item.provider,
+          target_model: item.target_model,
+          price_per_1k_tokens: item.price_per_1k_tokens,
+          external_price_per_1k_tokens: item.external_price_per_1k_tokens,
+          markup_percent: item.markup_percent,
+        });
+      } catch (error) {
+        setText("modelInfo", String(error));
+      }
+    }
+
+    async function estimate() {
+      try {
+        const payload = { model_id: currentModel, prompt: document.getElementById("promptInput").value };
+        const data = await apiFetch("/gateway/estimate-cost", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setText("estimateOut", data);
+      } catch (error) {
+        setText("estimateOut", String(error));
+      }
+    }
+
+    async function generate() {
+      try {
+        const payload = { model_id: currentModel, prompt: document.getElementById("promptInput").value, temperature: 0.3, max_tokens: 600 };
+        const data = await apiFetch("/gateway/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setText("generateOut", data);
+      } catch (error) {
+        setText("generateOut", String(error));
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem(API_KEY_STORAGE);
+      window.location.href = "/gateway/login";
+    }
+
+    function bind() {
+      document.getElementById("estimateBtn").addEventListener("click", estimate);
+      document.getElementById("generateBtn").addEventListener("click", generate);
+      document.getElementById("logoutBtn").addEventListener("click", logout);
+    }
+
+    async function boot() {
+      if (!getApiKey()) {
+        window.location.href = "/gateway/login";
+        return;
+      }
+      bind();
+      await loadModelInfo();
+    }
+
+    boot();
+  </script>
+</body>
+</html>

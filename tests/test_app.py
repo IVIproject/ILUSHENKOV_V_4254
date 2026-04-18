@@ -613,6 +613,47 @@ def test_gateway_admin_model_pricing_and_estimate():
         main_module.settings.gateway_admin_emails = previous_gateway_emails
 
 
+def test_gateway_admin_create_and_delete_model():
+    _clear_faq_table()
+    previous_gateway_emails = main_module.settings.gateway_admin_emails
+    main_module.settings.gateway_admin_emails = "admin@example.com"
+    try:
+        admin_register = client.post(
+            "/gateway/register",
+            json={"email": "admin@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+        )
+        assert admin_register.status_code == 200
+        admin_headers = {"X-Gateway-Key": admin_register.json()["api_key"]}
+
+        create_resp = client.post(
+            "/gateway/admin/models",
+            headers=admin_headers,
+            json={
+                "model_id": "local/custom-mini",
+                "display_name": "Custom Mini",
+                "provider": "ollama",
+                "target_model": "custom-mini:latest",
+                "price_per_1k_tokens": 3.0,
+                "markup_percent": 0.0,
+                "is_active": True,
+            },
+        )
+        assert create_resp.status_code == 200
+        created = create_resp.json()
+        assert created["model_id"] == "local/custom-mini"
+
+        list_resp = client.get("/gateway/admin/models", headers=admin_headers)
+        assert list_resp.status_code == 200
+        ids = [item["model_id"] for item in list_resp.json()["models"]]
+        assert "local/custom-mini" in ids
+
+        delete_resp = client.delete("/gateway/admin/models/local/custom-mini", headers=admin_headers)
+        assert delete_resp.status_code == 200
+        assert delete_resp.json()["deleted"] is True
+    finally:
+        main_module.settings.gateway_admin_emails = previous_gateway_emails
+
+
 def test_openai_compatible_endpoints():
     _clear_faq_table()
     register = client.post(

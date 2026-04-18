@@ -33,7 +33,9 @@ from .models import (
 from .schemas import (
     DomainSuggestionsRequest,
     DomainSuggestionsResponse,
+    GatewayAdminModelCreateRequest,
     GatewayAdminModelUpdateRequest,
+    GatewayAdminModelCreateRequest,
     GatewayAdminUserItem,
     GatewayAdminUserUpdateRequest,
     GatewayAdminUsersResponse,
@@ -498,11 +500,83 @@ def gateway_profile_page():
     return page.read_text(encoding="utf-8")
 
 
+@app.get("/gateway/register", response_class=HTMLResponse)
+def gateway_register_page():
+    page = Path("templates/gateway/register.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway register page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/login", response_class=HTMLResponse)
+def gateway_login_page():
+    page = Path("templates/gateway/login.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway login page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/models/page", response_class=HTMLResponse)
+def gateway_models_page():
+    page = Path("templates/gateway/models.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway models page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/model/{model_id:path}", response_class=HTMLResponse)
+def gateway_model_detail_page(model_id: str):
+    page = Path("templates/gateway/model-detail.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway model detail page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/history", response_class=HTMLResponse)
+def gateway_history_page():
+    page = Path("templates/gateway/history.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway history page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/finance", response_class=HTMLResponse)
+def gateway_finance_page():
+    page = Path("templates/gateway/finance.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway finance page not found")
+    return page.read_text(encoding="utf-8")
+
+
 @app.get("/gateway/admin", response_class=HTMLResponse)
 def gateway_admin_page():
     page = Path("templates/gateway/admin.html")
     if not page.exists():
         raise HTTPException(status_code=404, detail="Gateway admin page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/admin/users/ui", response_class=HTMLResponse)
+def gateway_admin_users_page():
+    page = Path("templates/gateway/admin-users.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway admin users page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/admin/models/ui", response_class=HTMLResponse)
+def gateway_admin_models_page():
+    page = Path("templates/gateway/admin-models.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway admin models page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/admin/finance/ui", response_class=HTMLResponse)
+def gateway_admin_finance_page():
+    page = Path("templates/gateway/admin-finance.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway admin finance page not found")
     return page.read_text(encoding="utf-8")
 
 
@@ -879,6 +953,48 @@ def gateway_admin_models(_: GatewayUser = Depends(_verify_gateway_admin_key)):
     return GatewayCatalogResponse(models=[_model_item_from_row(row) for row in rows])
 
 
+@app.get("/gateway/models/{model_id:path}", response_model=GatewayModelItem)
+def gateway_model_detail(model_id: str, _: GatewayUser = Depends(_get_gateway_user)):
+    with SessionLocal() as db:
+        _ensure_catalog_seeded(db)
+        row = _resolve_model_for_request(db, model_id)
+        return _model_item_from_row(row)
+
+
+@app.post("/gateway/admin/models", response_model=GatewayModelItem)
+def gateway_admin_create_model(
+    payload: GatewayAdminModelCreateRequest,
+    _: GatewayUser = Depends(_verify_gateway_admin_key),
+):
+    model_id = payload.model_id.strip().lower()
+    with SessionLocal() as db:
+        exists = (
+            db.query(GatewayModel.id)
+            .filter(func.lower(GatewayModel.model_key) == model_id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(status_code=409, detail=f"Model already exists: {model_id}")
+        row = GatewayModel(
+            model_key=model_id,
+            display_name=payload.display_name.strip(),
+            provider=payload.provider.strip().lower(),
+            target_model=payload.target_model.strip(),
+            price_per_1k_tokens=float(payload.price_per_1k_tokens),
+            external_price_per_1k_tokens=(
+                None
+                if payload.external_price_per_1k_tokens is None
+                else float(payload.external_price_per_1k_tokens)
+            ),
+            markup_percent=float(payload.markup_percent),
+            is_active=payload.is_active,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return _model_item_from_row(row)
+
+
 @app.patch("/gateway/admin/models/{model_id:path}", response_model=GatewayModelItem)
 def gateway_admin_update_model(
     model_id: str,
@@ -909,6 +1025,33 @@ def gateway_admin_update_model(
         db.commit()
         db.refresh(row)
         return _model_item_from_row(row)
+
+
+@app.delete("/gateway/admin/models/{model_id:path}")
+def gateway_admin_delete_model(
+    model_id: str,
+    _: GatewayUser = Depends(_verify_gateway_admin_key),
+):
+    normalized = model_id.strip().lower()
+    with SessionLocal() as db:
+        row = (
+            db.query(GatewayModel)
+            .filter(func.lower(GatewayModel.model_key) == normalized)
+            .first()
+        )
+        if not row:
+            row = (
+                db.query(GatewayModel)
+                .filter(func.lower(GatewayModel.target_model) == normalized)
+                .first()
+            )
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Unknown model_id: {model_id}")
+        if db.query(func.count(GatewayModel.id)).scalar() == 1:
+            raise HTTPException(status_code=400, detail="At least one model must remain in catalog")
+        db.delete(row)
+        db.commit()
+    return {"deleted": True, "model_id": model_id}
 
 
 @app.get("/gateway/balance", response_model=GatewayBalanceResponse)
