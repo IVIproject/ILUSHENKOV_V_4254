@@ -11,10 +11,14 @@
     .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
     .nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
     .nav a, .nav button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       text-decoration: none; border: 1px solid #334155; background: #0b1220; color: #e2e8f0;
-      border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 14px;
+      border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 14px; width: auto;
     }
     .nav a.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+    #logoutBtn { width: auto; margin-top: 0; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .model-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
@@ -40,8 +44,6 @@
     </div>
 
     <nav class="nav">
-      <a href="/gateway/register">Регистрация</a>
-      <a href="/gateway/login">Авторизация</a>
       <a href="/gateway/profile">Профиль</a>
       <a href="/gateway/models/page" class="active">Модели</a>
       <a href="/gateway/history">История</a>

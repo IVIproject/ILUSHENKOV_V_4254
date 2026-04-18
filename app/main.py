@@ -518,7 +518,6 @@ def gateway_register(payload: GatewayUserRegisterRequest):
     password_hash = f"{password_salt}${password_digest}"
     api_key, _, _, _ = generate_api_key()
     with SessionLocal() as db:
-        _ensure_catalog_seeded(db)
         exists = db.query(GatewayUser).filter(GatewayUser.email == email).first()
         if exists:
             if "$" not in (exists.password_hash or ""):
@@ -566,7 +565,6 @@ def gateway_register(payload: GatewayUserRegisterRequest):
 def gateway_login(payload: GatewayLoginRequest):
     email = normalize_email(payload.email)
     with SessionLocal() as db:
-        _ensure_catalog_seeded(db)
         user = db.query(GatewayUser).filter(GatewayUser.email == email).first()
         if not user:
             raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -709,7 +707,6 @@ def gateway_admin_update_user(
 ):
     valid_roles = {"user", "admin"}
     with SessionLocal() as db:
-        _ensure_catalog_seeded(db)
         user_row = db.query(GatewayUser).filter(GatewayUser.id == user_id).first()
         if not user_row:
             raise HTTPException(status_code=404, detail="Gateway user not found")

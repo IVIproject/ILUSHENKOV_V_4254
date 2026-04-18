@@ -11,10 +11,14 @@
     .container { max-width: 1080px; margin: 0 auto; padding: 24px 16px 56px; }
     .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
     .nav a, .nav button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       text-decoration: none; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px;
-      background: #111827; color: #e2e8f0; cursor: pointer; font-size: 14px;
+      background: #111827; color: #e2e8f0; cursor: pointer; font-size: 14px; width: auto;
     }
     .nav a.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+    #logoutBtn { width: auto; margin-top: 0; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .muted { color: #94a3b8; }
     pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
@@ -31,8 +35,6 @@
     <p class="muted">Редактирование цены и активности моделей.</p>
 
     <nav class="nav">
-      <a href="/gateway/register">Регистрация</a>
-      <a href="/gateway/login">Авторизация</a>
       <a href="/gateway/profile">Профиль</a>
       <a href="/gateway/models/page">Модели</a>
       <a href="/gateway/history">История</a>
