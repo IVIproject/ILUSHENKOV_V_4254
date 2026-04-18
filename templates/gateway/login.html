@@ -8,22 +8,17 @@
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
-    .container { max-width: 980px; margin: 0 auto; padding: 24px 16px 56px; }
-    .header { margin-bottom: 12px; }
-    .nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-    .nav a, .nav button {
-      text-decoration: none; border: 1px solid #334155; background: #0b1220; color: #e2e8f0;
-      border-radius: 8px; padding: 8px 12px; font-size: 14px; cursor: pointer;
-    }
-    .nav a.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+    .container { max-width: 760px; margin: 0 auto; padding: 26px 16px 52px; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }
-    .muted { color: #94a3b8; margin: 0; }
+    .muted { color: #94a3b8; margin: 0 0 14px; }
     label { display: block; margin-top: 8px; color: #cbd5e1; font-size: 14px; }
     input, button {
       width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #334155;
       background: #0b1220; color: #e2e8f0; padding: 10px 12px; margin-top: 6px; margin-bottom: 10px;
     }
     button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
+    .links { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .links a { color: #93c5fd; text-decoration: none; font-size: 14px; }
     pre {
       margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155;
       border-radius: 10px; padding: 10px; min-height: 48px;
@@ -32,20 +27,8 @@
 </head>
 <body>
   <div class="container">
-    <div class="header">
-      <h1>Авторизация</h1>
-      <p class="muted">Введите e-mail и пароль для входа в кабинет.</p>
-    </div>
-
-    <nav class="nav">
-      <a href="/gateway/register">Регистрация</a>
-      <a href="/gateway/login" class="active">Авторизация</a>
-      <a href="/gateway/profile">Профиль</a>
-      <a href="/gateway/models/page">Модели</a>
-      <a href="/gateway/history">История</a>
-      <a id="adminLink" href="/gateway/admin" style="display:none;">Управление</a>
-      <button id="logoutBtn" type="button">Выйти</button>
-    </nav>
+    <h1>Авторизация</h1>
+    <p class="muted">Введите e-mail и пароль для входа в кабинет.</p>
 
     <section class="card">
       <label for="email">E-mail</label>
@@ -54,6 +37,9 @@
       <input id="password" type="password" />
       <button id="loginBtn" type="button">Войти</button>
       <pre id="out"></pre>
+      <div class="links">
+        <a href="/gateway/register">Нет аккаунта? Регистрация</a>
+      </div>
     </section>
   </div>
   <script>
@@ -62,21 +48,6 @@
 
     function setText(id, value) {
       document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    }
-
-    function getRole() {
-      return localStorage.getItem(USER_ROLE_STORAGE) || "";
-    }
-
-    function updateNav() {
-      const isAdmin = getRole() === "admin";
-      document.getElementById("adminLink").style.display = isAdmin ? "inline-block" : "none";
-    }
-
-    function logout() {
-      localStorage.removeItem(API_KEY_STORAGE);
-      localStorage.removeItem(USER_ROLE_STORAGE);
-      window.location.href = "/gateway/login";
     }
 
     async function parseResponse(response) {
@@ -104,7 +75,6 @@
         const data = await parseResponse(response);
         localStorage.setItem(API_KEY_STORAGE, data.api_key);
         localStorage.setItem(USER_ROLE_STORAGE, data.role || "user");
-        updateNav();
         setText("out", { login: "ok", role: data.role });
         window.location.href = data.role === "admin" ? "/gateway/admin" : "/gateway/profile";
       } catch (error) {
@@ -113,8 +83,6 @@
     }
 
     document.getElementById("loginBtn").addEventListener("click", login);
-    document.getElementById("logoutBtn").addEventListener("click", logout);
-    updateNav();
   </script>
 </body>
 </html>

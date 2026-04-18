@@ -62,8 +62,8 @@ def _clear_faq_table():
     with main_module.SessionLocal() as db:
         db.query(SupportFaqQueryMetric).delete()
         db.query(GatewayUsageLog).delete()
-        db.query(SupportFaqEntry).delete()
         db.query(GatewayModel).delete()
+        db.query(SupportFaqEntry).delete()
         db.query(GatewayUser).delete()
         db.commit()
 
@@ -553,6 +553,10 @@ def test_gateway_admin_create_and_delete_model():
         )
         assert admin_register.status_code == 200
         admin_headers = {"X-Gateway-Key": admin_register.json()["api_key"]}
+
+        seeded = client.get("/gateway/admin/models", headers=admin_headers)
+        assert seeded.status_code == 200
+        assert len(seeded.json()["models"]) >= 1
 
         create_resp = client.post(
             "/gateway/admin/models",
