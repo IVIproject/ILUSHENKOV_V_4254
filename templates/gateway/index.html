@@ -260,6 +260,15 @@
         </div>
         <pre id="usageOut"></pre>
       </div>
+
+      <div class="card">
+        <h2>Мои финансовые операции</h2>
+        <div class="inline-group">
+          <input id="auditLimitInput" type="number" min="1" max="200" value="30" />
+          <button id="loadAuditBtn">Показать операции</button>
+        </div>
+        <pre id="auditOut"></pre>
+      </div>
     </section>
 
     <section id="adminTab" class="tab-pane">
@@ -296,6 +305,22 @@
         <h2>Логи выбранного пользователя</h2>
         <p class="small">Нажмите кнопку "Usage" в таблице пользователей.</p>
         <pre id="adminUsageOut"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Все финансовые операции</h2>
+        <div class="grid">
+          <div>
+            <label>Фильтр по user_id (опционально)</label>
+            <input id="adminAuditUserIdInput" type="number" min="1" placeholder="например 3" />
+          </div>
+          <div>
+            <label>Лимит</label>
+            <input id="adminAuditLimitInput" type="number" min="1" max="500" value="100" />
+          </div>
+        </div>
+        <button id="loadAdminAuditBtn">Показать финансовые операции</button>
+        <pre id="adminAuditOut"></pre>
       </div>
     </section>
   </div>
@@ -522,6 +547,21 @@
       }
     }
 
+    async function loadUserBalanceAudit() {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        setText("auditOut", "Сначала укажите API key.");
+        return;
+      }
+      try {
+        const limit = Number(document.getElementById("auditLimitInput").value || "30");
+        const data = await apiFetch(`/gateway/audit/balance?limit=${encodeURIComponent(limit)}`, {}, apiKey);
+        setText("auditOut", data.items);
+      } catch (error) {
+        setText("auditOut", String(error));
+      }
+    }
+
     function createActionButtons(user) {
       const wrap = document.createElement("div");
       wrap.style.display = "grid";
@@ -537,6 +577,11 @@
       setBalance.type = "number";
       setBalance.placeholder = "set_balance_tokens";
       setBalance.style.margin = "0";
+
+      const reason = document.createElement("input");
+      reason.type = "text";
+      reason.placeholder = "reason (обязательно для баланса)";
+      reason.style.margin = "0";
 
       const tariff = document.createElement("select");
       ["starter", "business", "pro"].forEach((code) => {
@@ -567,6 +612,7 @@
         tariff_code: tariff.value,
         add_tokens: Number(addTokens.value || "0"),
         set_balance_tokens: setBalance.value === "" ? null : Number(setBalance.value),
+        balance_reason: reason.value.trim() || null,
         is_active: activeInput.checked,
         regenerate_api_key: regenInput.checked,
       });
@@ -578,6 +624,7 @@
 
       wrap.appendChild(addTokens);
       wrap.appendChild(setBalance);
+      wrap.appendChild(reason);
       wrap.appendChild(tariff);
       wrap.appendChild(activeCheckbox);
       wrap.appendChild(regenCheckbox);
@@ -701,6 +748,26 @@
       }
     }
 
+    async function loadAdminBalanceAudit() {
+      const adminKey = getAdminKey();
+      if (!adminKey) {
+        setText("adminAuditOut", "Сначала укажите Admin key.");
+        return;
+      }
+      try {
+        const limit = Number(document.getElementById("adminAuditLimitInput").value || "100");
+        const userIdRaw = document.getElementById("adminAuditUserIdInput").value.trim();
+        const query = new URLSearchParams({ limit: String(limit) });
+        if (userIdRaw) {
+          query.set("user_id", userIdRaw);
+        }
+        const data = await apiFetch(`/gateway/admin/audit/balance?${query.toString()}`, {}, null, adminKey);
+        setText("adminAuditOut", data.items);
+      } catch (error) {
+        setText("adminAuditOut", String(error));
+      }
+    }
+
     function bindEvents() {
       document.getElementById("registerBtn").addEventListener("click", registerUser);
       document.getElementById("loginBtn").addEventListener("click", loginUser);
@@ -709,12 +776,14 @@
       document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
       document.getElementById("generateBtn").addEventListener("click", runGeneration);
       document.getElementById("loadUsageBtn").addEventListener("click", loadUsage);
+      document.getElementById("loadAuditBtn").addEventListener("click", loadUserBalanceAudit);
       document.getElementById("saveKeyBtn").addEventListener("click", () => saveApiKey(getApiKey()));
       document.getElementById("logoutBtn").addEventListener("click", () => saveApiKey(""));
 
       document.getElementById("saveAdminKeyBtn").addEventListener("click", () => saveAdminKey(getAdminKey()));
       document.getElementById("clearAdminKeyBtn").addEventListener("click", () => saveAdminKey(""));
       document.getElementById("loadUsersBtn").addEventListener("click", loadAdminUsers);
+      document.getElementById("loadAdminAuditBtn").addEventListener("click", loadAdminBalanceAudit);
     }
 
     function restoreSession() {
@@ -738,6 +807,7 @@
       if (getApiKey()) {
         await loadModels();
         await loadProfile();
+        await loadUserBalanceAudit();
       }
     }
 

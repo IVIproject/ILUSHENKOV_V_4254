@@ -24,6 +24,7 @@ from .gateway_services import (
 )
 from .logging_config import get_logger, setup_logging
 from .models import (
+    GatewayBalanceAuditLog,
     GatewayModel,
     GatewayUsageLog,
     GatewayUser,
@@ -37,6 +38,8 @@ from .schemas import (
     GatewayAdminUserItem,
     GatewayAdminUserUpdateRequest,
     GatewayAdminUsersResponse,
+    GatewayBalanceAuditItem,
+    GatewayBalanceAuditResponse,
     GatewayBalanceResponse,
     GatewayCatalogResponse,
     GatewayChatRequest,
@@ -181,6 +184,47 @@ def _verify_gateway_user_password(user: GatewayUser, password: str) -> bool:
     if not salt or not digest:
         return False
     return verify_password(password, salt, digest)
+
+
+def _log_balance_audit(
+    *,
+    db,
+    user_id: int,
+    action: str,
+    delta_tokens: int,
+    balance_before: int,
+    balance_after: int,
+    actor: str,
+    actor_reference: str | None = None,
+    reason: str | None = None,
+) -> None:
+    db.add(
+        GatewayBalanceAuditLog(
+            user_id=user_id,
+            action=action,
+            delta_tokens=delta_tokens,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            actor=actor,
+            actor_reference=actor_reference,
+            reason=reason,
+        )
+    )
+
+
+def _to_balance_audit_item(row: GatewayBalanceAuditLog) -> GatewayBalanceAuditItem:
+    return GatewayBalanceAuditItem(
+        id=row.id,
+        user_id=row.user_id,
+        action=row.action,
+        delta_tokens=row.delta_tokens,
+        balance_before=row.balance_before,
+        balance_after=row.balance_after,
+        actor=row.actor,
+        actor_reference=row.actor_reference,
+        reason=row.reason,
+        created_at=row.created_at,
+    )
 
 
 def _resolve_template_path(template_name: str) -> Path:
@@ -465,6 +509,21 @@ def gateway_usage(limit: int = Query(20, ge=1, le=200), user: GatewayUser = Depe
     )
 
 
+@app.get("/gateway/audit/balance", response_model=GatewayBalanceAuditResponse)
+def gateway_balance_audit(limit: int = Query(20, ge=1, le=200), user: GatewayUser = Depends(_get_gateway_user)):
+    with SessionLocal() as db:
+        rows = (
+            db.query(GatewayBalanceAuditLog)
+            .filter(GatewayBalanceAuditLog.user_id == user.id)
+            .order_by(GatewayBalanceAuditLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+    return GatewayBalanceAuditResponse(
+        items=[_to_balance_audit_item(row) for row in rows]
+    )
+
+
 @app.get("/gateway/admin/users", response_model=GatewayAdminUsersResponse)
 def gateway_admin_users(
     limit: int = Query(50, ge=1, le=200),
@@ -538,6 +597,7 @@ def gateway_admin_update_user(
         user_row = db.query(GatewayUser).filter(GatewayUser.id == user_id).first()
         if not user_row:
             raise HTTPException(status_code=404, detail="Gateway user not found")
+        original_balance = int(user_row.tokens_balance)
 
         if payload.email is not None:
             normalized_email = normalize_email(payload.email)
@@ -563,6 +623,19 @@ def gateway_admin_update_user(
             if updated_balance < 0:
                 raise HTTPException(status_code=400, detail="Resulting token balance cannot be negative")
             user_row.tokens_balance = updated_balance
+
+        if int(user_row.tokens_balance) != original_balance:
+            _log_balance_audit(
+                db=db,
+                user_id=user_row.id,
+                action="admin_adjustment",
+                delta_tokens=int(user_row.tokens_balance) - original_balance,
+                balance_before=original_balance,
+                balance_after=int(user_row.tokens_balance),
+                actor="admin",
+                actor_reference="gateway-admin",
+                reason=payload.balance_reason or "Admin balance update",
+            )
 
         if payload.is_active is not None:
             user_row.is_active = payload.is_active
@@ -619,6 +692,23 @@ def gateway_admin_user_usage(
     )
 
 
+@app.get("/gateway/admin/audit/balance", response_model=GatewayBalanceAuditResponse)
+def gateway_admin_balance_audit(
+    limit: int = Query(100, ge=1, le=500),
+    user_id: int | None = Query(default=None, ge=1),
+    _: None = Depends(_verify_gateway_admin_key),
+):
+    with SessionLocal() as db:
+        query = db.query(GatewayBalanceAuditLog)
+        if user_id is not None:
+            exists = db.query(GatewayUser.id).filter(GatewayUser.id == user_id).first()
+            if not exists:
+                raise HTTPException(status_code=404, detail="Gateway user not found")
+            query = query.filter(GatewayBalanceAuditLog.user_id == user_id)
+        rows = query.order_by(GatewayBalanceAuditLog.id.desc()).limit(limit).all()
+    return GatewayBalanceAuditResponse(items=[_to_balance_audit_item(row) for row in rows])
+
+
 @app.get("/gateway/models", response_model=GatewayCatalogResponse)
 def gateway_models(_: GatewayUser = Depends(_get_gateway_user)):
     with SessionLocal() as db:
@@ -668,7 +758,19 @@ def gateway_tokens_topup(payload: GatewayTopUpRequest, user: GatewayUser = Depen
         row = db.query(GatewayUser).filter(GatewayUser.id == user.id).first()
         if not row:
             raise HTTPException(status_code=404, detail="Gateway user not found")
+        balance_before = int(row.tokens_balance)
         row.tokens_balance += payload.tokens
+        _log_balance_audit(
+            db=db,
+            user_id=row.id,
+            action="self_topup",
+            delta_tokens=int(payload.tokens),
+            balance_before=balance_before,
+            balance_after=int(row.tokens_balance),
+            actor="user",
+            actor_reference=row.email,
+            reason="Manual top-up from gateway cabinet/API",
+        )
         db.commit()
         db.refresh(row)
         return GatewayTopUpResponse(user_id=row.id, token_balance=row.tokens_balance)

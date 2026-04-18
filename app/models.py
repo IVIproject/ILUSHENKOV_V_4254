@@ -107,3 +107,22 @@ class GatewayUsageLog(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class GatewayBalanceAuditLog(Base):
+    __tablename__ = "gateway_balance_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    delta_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    balance_before: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    balance_after: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actor: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
+    actor_reference: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )

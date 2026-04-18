@@ -52,7 +52,7 @@ API is available through Nginx at:
 curl http://127.0.0.1:8080/health
 ```
 
-## OpenRouter-like gateway (MVP)
+## OpenRouter-like gateway (cabinet + billing + admin)
 
 New gateway capabilities:
 
@@ -60,7 +60,8 @@ New gateway capabilities:
 - model catalog with local and external provider routing
 - pay-per-token balance accounting
 - external proxy to OpenAI-compatible upstream (for example ChatGPT)
-- simple web page for pricing and quick onboarding (`GET /gateway`)
+- full web cabinet on `/gateway` (user + admin tabs)
+- balance audit log for each financial operation
 
 ### Gateway setup
 
@@ -71,15 +72,63 @@ OLLAMA_MODEL=qwen2.5:3b
 OLLAMA_SECONDARY_MODEL=llama3.2:3b
 OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions
 OPENAI_API_KEY=
+GATEWAY_ADMIN_API_KEY=change-me-gateway-admin-key
 ```
 
 Notes:
 
 - `OLLAMA_MODEL` and `OLLAMA_SECONDARY_MODEL` are local Ollama models.
 - if `OPENAI_API_KEY` is empty, proxy model calls return provider error.
-- `OPENAI_BASE_URL` must point to full chat-completions URL.
+- `OPENAI_BASE_URL` may be either API base (`https://api.openai.com/v1`) or full chat-completions URL.
+- `GATEWAY_ADMIN_API_KEY` protects gateway admin endpoints. If empty, fallback is `ADMIN_API_KEY`.
 
-### Register user and get API key
+### Browser usage (step-by-step)
+
+After startup, open in browser:
+
+- `http://127.0.0.1:8080/gateway`
+
+You will see two tabs: **Пользователь** and **Админ**.
+
+#### User flow (Пользователь)
+
+1. Registration:
+   - fill `Email`, `Пароль`, `Тариф`
+   - click `Создать аккаунт`
+2. Login later:
+   - fill `Email`, `Пароль`
+   - click `Войти и получить ключ`
+3. Balance and profile:
+   - click `Обновить профиль`
+4. Top up tokens:
+   - set token amount
+   - click `Пополнить`
+5. Model call:
+   - click `Обновить список моделей`
+   - choose model
+   - enter prompt
+   - click `Отправить`
+6. Logs:
+   - `Показать usage` for generation calls
+   - `Показать операции` for financial operations (top-up, charges, admin adjustments)
+
+#### Admin flow (Админ)
+
+1. Put `GATEWAY_ADMIN_API_KEY` value into the admin key field.
+2. Click `Загрузить пользователей`.
+3. For each user you can:
+   - change tariff
+   - set absolute balance (`set_balance_tokens`)
+   - add/subtract tokens (`add_tokens`)
+   - provide `reason` for balance change
+   - activate/deactivate account
+   - regenerate API key
+4. Click `Usage` to see user generation log.
+5. Open `Все финансовые операции` and click `Показать финансовые операции`:
+   - all operations
+   - optional filter by `user_id`
+
+### Register user and get API key (API example)
 
 ```bash
 curl -X POST "http://127.0.0.1:8080/gateway/register" \
@@ -153,6 +202,30 @@ Billing is token-based:
 - request is accepted only if user has enough balance
 - `tokens_spent` is deducted from account
 - usage transaction is saved in `gateway_usage_logs`
+- financial transactions are saved in `gateway_balance_audit_logs`
+
+### Balance audit endpoints
+
+User own audit:
+
+```bash
+curl -X GET "http://127.0.0.1:8080/gateway/audit/balance?limit=30" \
+  -H "X-Gateway-Key: asv_your_key_here"
+```
+
+Admin all audits:
+
+```bash
+curl -X GET "http://127.0.0.1:8080/gateway/admin/audit/balance?limit=100" \
+  -H "X-Gateway-Admin-Key: your-admin-key"
+```
+
+Admin filtered by user:
+
+```bash
+curl -X GET "http://127.0.0.1:8080/gateway/admin/audit/balance?limit=100&user_id=5" \
+  -H "X-Gateway-Admin-Key: your-admin-key"
+```
 
 ## 3 working modes (single endpoint)
 
@@ -256,6 +329,24 @@ curl -X POST "http://127.0.0.1:8080/support/faq/import" \
 ```
 
 Without key (or with wrong key) API returns `401`.
+
+### How `GATEWAY_ADMIN_API_KEY` works (gateway admin)
+
+`GATEWAY_ADMIN_API_KEY` protects gateway admin endpoints:
+
+- `GET /gateway/admin/users`
+- `PATCH /gateway/admin/users/{user_id}`
+- `GET /gateway/admin/users/{user_id}/usage`
+- `GET /gateway/admin/audit/balance`
+
+If `GATEWAY_ADMIN_API_KEY` is empty, the gateway admin endpoints fallback to `ADMIN_API_KEY`.
+If both keys are empty, admin gateway endpoints return `503` (not configured).
+
+Required header:
+
+```http
+X-Gateway-Admin-Key: <gateway-admin-key>
+```
 
 - Generic text generation:
 

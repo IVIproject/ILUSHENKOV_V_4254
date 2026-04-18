@@ -8,7 +8,14 @@ os.environ["GATEWAY_PROVIDER_API_KEY"] = "test-provider-key"
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.db import Base, engine
-from app.models import SupportFaqEntry, SupportFaqQueryMetric, GatewayModel, GatewayUser, GatewayUsageLog
+from app.models import (
+    SupportFaqEntry,
+    SupportFaqQueryMetric,
+    GatewayModel,
+    GatewayUser,
+    GatewayUsageLog,
+    GatewayBalanceAuditLog,
+)
 
 class FakeClient:
     def list(self):
@@ -54,6 +61,7 @@ Base.metadata.create_all(bind=engine)
 def _clear_faq_table():
     with main_module.SessionLocal() as db:
         db.query(SupportFaqQueryMetric).delete()
+        db.query(GatewayBalanceAuditLog).delete()
         db.query(GatewayUsageLog).delete()
         db.query(SupportFaqEntry).delete()
         db.query(GatewayModel).delete()
@@ -373,6 +381,62 @@ def test_gateway_login_me_and_usage():
     assert items[0]["tokens_spent"] >= 1
 
 
+def test_gateway_balance_audit_user_and_admin():
+    _clear_faq_table()
+    previous_gateway_admin = main_module.settings.gateway_admin_api_key
+    previous_admin = main_module.settings.admin_api_key
+    main_module.settings.gateway_admin_api_key = "gateway-admin-test-key"
+    main_module.settings.admin_api_key = None
+    try:
+        register = client.post(
+            "/gateway/register",
+            json={"email": "audit@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+        )
+        assert register.status_code == 200
+        user_payload = register.json()
+        user_id = user_payload["user_id"]
+        user_headers = {"X-Gateway-Key": user_payload["api_key"]}
+
+        topup = client.post("/gateway/tokens/topup", headers=user_headers, json={"tokens": 1500})
+        assert topup.status_code == 200
+
+        user_audit = client.get("/gateway/audit/balance?limit=10", headers=user_headers)
+        assert user_audit.status_code == 200
+        user_items = user_audit.json()["items"]
+        assert len(user_items) >= 1
+        assert user_items[0]["action"] == "self_topup"
+        assert user_items[0]["delta_tokens"] == 1500
+        assert user_items[0]["actor"] == "user"
+
+        admin_headers = {"X-Gateway-Admin-Key": "gateway-admin-test-key"}
+        update = client.patch(
+            f"/gateway/admin/users/{user_id}",
+            headers=admin_headers,
+            json={"add_tokens": 300, "balance_reason": "bonus for testing"},
+        )
+        assert update.status_code == 200
+
+        admin_audit = client.get("/gateway/admin/audit/balance?limit=20", headers=admin_headers)
+        assert admin_audit.status_code == 200
+        all_items = admin_audit.json()["items"]
+        assert any(item["action"] == "admin_adjustment" for item in all_items)
+        adjusted = next(item for item in all_items if item["action"] == "admin_adjustment")
+        assert adjusted["actor"] == "admin"
+        assert adjusted["reason"] == "bonus for testing"
+
+        filtered = client.get(
+            f"/gateway/admin/audit/balance?limit=20&user_id={user_id}",
+            headers=admin_headers,
+        )
+        assert filtered.status_code == 200
+        filtered_items = filtered.json()["items"]
+        assert len(filtered_items) >= 2
+        assert all(item["user_id"] == user_id for item in filtered_items)
+    finally:
+        main_module.settings.gateway_admin_api_key = previous_gateway_admin
+        main_module.settings.admin_api_key = previous_admin
+
+
 def test_gateway_admin_manage_users():
     _clear_faq_table()
     previous_gateway_admin = main_module.settings.gateway_admin_api_key
@@ -399,6 +463,7 @@ def test_gateway_admin_manage_users():
             json={
                 "tariff_code": "pro",
                 "set_balance_tokens": 12345,
+                "balance_reason": "switching to paid plan",
                 "is_active": False,
                 "regenerate_api_key": True,
             },

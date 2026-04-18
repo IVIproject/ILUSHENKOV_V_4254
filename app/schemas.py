@@ -184,6 +184,23 @@ class GatewayUsageLogsResponse(BaseModel):
     items: list[GatewayUsageLogItem]
 
 
+class GatewayBalanceAuditItem(BaseModel):
+    id: int
+    user_id: int
+    action: str
+    delta_tokens: int
+    balance_before: int
+    balance_after: int
+    actor: str
+    actor_reference: str | None = None
+    reason: str | None = None
+    created_at: datetime
+
+
+class GatewayBalanceAuditResponse(BaseModel):
+    items: list[GatewayBalanceAuditItem]
+
+
 class GatewayAdminUserItem(BaseModel):
     user_id: int
     email: str
@@ -206,6 +223,7 @@ class GatewayAdminUserUpdateRequest(BaseModel):
     tariff_code: str | None = Field(default=None, min_length=3, max_length=32)
     set_balance_tokens: int | None = Field(default=None, ge=0, le=50_000_000)
     add_tokens: int | None = Field(default=None, ge=-5_000_000, le=5_000_000)
+    balance_reason: str | None = Field(default=None, min_length=2, max_length=255)
     is_active: bool | None = None
     regenerate_api_key: bool = False
 
