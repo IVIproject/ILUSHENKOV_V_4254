@@ -52,6 +52,83 @@ API is available through Nginx at:
 curl http://127.0.0.1:8080/health
 ```
 
+## OpenRouter-like gateway (MVP)
+
+New gateway capabilities:
+
+- user registration and API key issuance
+- model catalog with local and external provider routing
+- pay-per-token balance accounting
+- external proxy to OpenAI-compatible upstream (for example ChatGPT)
+- simple web page for pricing and quick onboarding (`GET /gateway`)
+
+### Gateway setup
+
+Add variables to `.env`:
+
+```env
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_SECONDARY_MODEL=llama3.2:3b
+OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions
+OPENAI_API_KEY=
+```
+
+Notes:
+
+- `OLLAMA_MODEL` and `OLLAMA_SECONDARY_MODEL` are local Ollama models.
+- if `OPENAI_API_KEY` is empty, proxy model calls return provider error.
+- `OPENAI_BASE_URL` must point to full chat-completions URL.
+
+### Register user and get API key
+
+```bash
+curl -X POST "http://127.0.0.1:8080/gateway/register" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"strong-pass-123","tariff_code":"starter"}'
+```
+
+Top up test balance:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/gateway/tokens/topup" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: asv_your_key_here" \
+  -d '{"tokens":100000}'
+```
+
+List models:
+
+```bash
+curl -X GET "http://127.0.0.1:8080/gateway/models" \
+  -H "X-Gateway-Key: asv_your_key_here"
+```
+
+### Gateway inference
+
+Local model:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: asv_your_key_here" \
+  -d '{"model_id":"local/qwen2.5-3b","prompt":"Привет, коротко расскажи про VPS"}'
+```
+
+Proxy model (OpenAI upstream):
+
+```bash
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: asv_your_key_here" \
+  -d '{"model_id":"proxy/openai-gpt-4o-mini","prompt":"Сделай краткий план запуска сайта"}'
+```
+
+Billing is token-based:
+
+- request is accepted only if user has enough balance
+- `tokens_spent` is deducted from account
+- usage transaction is saved in `gateway_usage_logs`
+
 ## 3 working modes (single endpoint)
 
 Unified endpoint:

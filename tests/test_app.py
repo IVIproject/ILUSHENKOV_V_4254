@@ -3,11 +3,12 @@ os.environ["DATABASE_URL"] = "sqlite:////tmp/ai_servise_test.db"
 os.environ["OLLAMA_HOST"] = "http://fake-ollama"
 os.environ["OLLAMA_MODEL"] = "qwen2.5:3b"
 os.environ["LOG_LEVEL"] = "INFO"
+os.environ["GATEWAY_PROVIDER_API_KEY"] = "test-provider-key"
 
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.db import Base, engine
-from app.models import SupportFaqEntry, SupportFaqQueryMetric
+from app.models import SupportFaqEntry, SupportFaqQueryMetric, GatewayModel, GatewayUser
 
 class FakeClient:
     def list(self):
@@ -33,6 +34,10 @@ class FakeClient:
                     "content": "Продлить домен можно в личном кабинете в разделе управления услугами."
                 }
             }
+        if "Как защитить API" in text:
+            return {
+                "message": {"content": "Используйте API-ключи, лимиты и аудит запросов."}
+            }
         if stream:
             def _iter():
                 yield {"message": {"content": "part1 "}}
@@ -50,6 +55,8 @@ def _clear_faq_table():
     with main_module.SessionLocal() as db:
         db.query(SupportFaqQueryMetric).delete()
         db.query(SupportFaqEntry).delete()
+        db.query(GatewayModel).delete()
+        db.query(GatewayUser).delete()
         db.commit()
 
 client = TestClient(main_module.app)
@@ -284,3 +291,66 @@ def test_admin_api_key_protects_import_endpoints():
         assert r_dialog_unauthorized.status_code == 401
     finally:
         main_module.settings.admin_api_key = previous
+
+
+def test_gateway_register_models_and_generate():
+    _clear_faq_table()
+    register = client.post(
+        "/gateway/register",
+        json={"email": "user@example.com", "password": "strong-pass-123"},
+    )
+    assert register.status_code == 200
+    data = register.json()
+    assert data["token_balance"] == 0
+    assert data["api_key"]
+
+    gateway_key = data["api_key"]
+    headers = {"X-Gateway-Key": gateway_key}
+
+    topup = client.post("/gateway/tokens/topup", headers=headers, json={"tokens": 5000})
+    assert topup.status_code == 200
+    assert topup.json()["token_balance"] == 5000
+
+    models_resp = client.get("/gateway/models", headers=headers)
+    assert models_resp.status_code == 200
+    model_ids = [m["model_id"] for m in models_resp.json()["models"]]
+    assert "local/qwen2.5-3b" in model_ids
+    assert "local/llama3.2-3b" in model_ids
+    assert "proxy/openai-gpt-4o-mini" in model_ids
+
+    generate = client.post(
+        "/gateway/generate",
+        headers=headers,
+        json={"model_id": "local/qwen2.5-3b", "prompt": "Как защитить API?", "max_tokens": 120},
+    )
+    assert generate.status_code == 200
+    out = generate.json()
+    assert "answer" in out
+    assert out["provider"] == "ollama"
+    assert out["tokens_spent"] > 0
+    assert out["token_balance"] < 5000
+
+
+def test_gateway_provider_requires_configured_key():
+    _clear_faq_table()
+    main_module.settings.openai_api_key = None
+    try:
+        register = client.post(
+            "/gateway/register",
+            json={"email": "provider@example.com", "password": "strong-pass-123"},
+        )
+        assert register.status_code == 200
+        key = register.json()["api_key"]
+        headers = {"X-Gateway-Key": key}
+
+        topup = client.post("/gateway/tokens/topup", headers=headers, json={"tokens": 5000})
+        assert topup.status_code == 200
+
+        r = client.post(
+            "/gateway/generate",
+            headers=headers,
+            json={"model_id": "proxy/openai-gpt-4o-mini", "prompt": "Привет", "max_tokens": 80},
+        )
+        assert r.status_code == 502
+    finally:
+        main_module.settings.openai_api_key = "test-provider-key"

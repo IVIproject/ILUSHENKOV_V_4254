@@ -108,3 +108,81 @@ class StatsResponse(BaseModel):
     support_faq_avg_relevance_score: float
     support_faq_top_questions: list[str]
     latest_request_at: datetime | None = None
+
+
+class GatewayUserRegisterRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=8, max_length=255)
+    tariff_code: str = Field(default="starter", min_length=3, max_length=32)
+
+
+class GatewayUserResponse(BaseModel):
+    user_id: int
+    email: str
+    api_key: str
+    token_balance: int
+    tariff_code: str
+
+
+class GatewayTopUpRequest(BaseModel):
+    tokens: int = Field(..., ge=1, le=5_000_000)
+
+
+class GatewayTopUpResponse(BaseModel):
+    user_id: int
+    token_balance: int
+
+
+class GatewayTariffItem(BaseModel):
+    code: str
+    name: str
+    monthly_price_rub: int
+    included_tokens: int
+    overage_price_per_1k_tokens_rub: float
+    features: list[str]
+
+
+class GatewayTariffsResponse(BaseModel):
+    tariffs: list[GatewayTariffItem]
+
+
+class GatewayBalanceResponse(BaseModel):
+    user_id: int
+    token_balance: int
+    tariff_code: str
+
+
+class GatewayModelItem(BaseModel):
+    model_id: str
+    display_name: str
+    provider: str
+    target_model: str
+    price_per_1k_tokens: float
+    is_active: bool
+
+
+class GatewayCatalogResponse(BaseModel):
+    models: list[GatewayModelItem]
+
+
+class GatewayChatMessage(BaseModel):
+    role: str = Field(..., min_length=3, max_length=16)
+    content: str = Field(..., min_length=1, max_length=10000)
+
+
+class GatewayGenerateRequest(BaseModel):
+    model_id: str = Field(..., min_length=3, max_length=128)
+    prompt: str = Field(..., min_length=1, max_length=10_000)
+    max_tokens: int = Field(default=300, ge=1, le=4000)
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+
+
+class GatewayGenerateResponse(BaseModel):
+    provider: str
+    model_id: str
+    answer: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    tokens_spent: int
+    token_balance: int
