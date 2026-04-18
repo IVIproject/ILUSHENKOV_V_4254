@@ -62,6 +62,7 @@ class GatewayUser(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     api_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="user")
     plan: Mapped[str] = mapped_column(String(64), nullable=False, default="starter")
     tokens_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -81,6 +82,8 @@ class GatewayModel(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     target_model: Mapped[str] = mapped_column(String(255), nullable=False)
     price_per_1k_tokens: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    external_price_per_1k_tokens: Mapped[float | None] = mapped_column(Float, nullable=True)
+    markup_percent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

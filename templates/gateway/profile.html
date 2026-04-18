@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gateway - Profile</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0b1220;
+      color: #e2e8f0;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 20px 14px 40px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    label {
+      display: block;
+      margin: 6px 0;
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+    input, textarea, select, button {
+      width: 100%;
+      box-sizing: border-box;
+      border-radius: 8px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 10px 12px;
+      margin-top: 6px;
+      margin-bottom: 10px;
+    }
+    button {
+      border: 0;
+      cursor: pointer;
+      background: #2563eb;
+      font-weight: 700;
+    }
+    button.secondary {
+      background: #374151;
+    }
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+    pre {
+      margin: 0;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px;
+      white-space: pre-wrap;
+      min-height: 40px;
+    }
+    .muted {
+      color: #94a3b8;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>Профиль пользователя</h1>
+        <div class="muted">Личный кабинет без админ-переключателя.</div>
+      </div>
+      <div>
+        <button id="logoutBtn" class="secondary">Выйти</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Профиль</h2>
+      <button id="refreshProfileBtn">Обновить профиль</button>
+      <pre id="profileOut"></pre>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Баланс</h2>
+        <label>Пополнить токены</label>
+        <input id="topupTokens" type="number" min="1" value="1000" />
+        <button id="topupBtn">Пополнить</button>
+        <pre id="topupOut"></pre>
+      </div>
+      <div class="card">
+        <h2>Модели</h2>
+        <button id="loadModelsBtn">Загрузить модели</button>
+        <select id="modelSelect"></select>
+        <pre id="modelsOut"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Запрос к модели</h2>
+      <label>Промпт</label>
+      <textarea id="promptInput" placeholder="Введите текст запроса"></textarea>
+      <button id="estimateBtn" class="secondary">Оценить стоимость</button>
+      <pre id="estimateOut"></pre>
+      <div class="muted">
+        Пояснение: мы убрали temperature и max_tokens из UI. Для дипломной версии используется стабильный режим,
+        а сервис сам подбирает параметры. Это проще и понятнее для пользователя.
+      </div>
+      <button id="generateBtn">Отправить запрос</button>
+      <pre id="generateOut"></pre>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>История usage</h2>
+        <label>Лимит</label>
+        <input id="usageLimit" type="number" min="1" max="200" value="20" />
+        <button id="loadUsageBtn">Показать usage</button>
+        <pre id="usageOut"></pre>
+      </div>
+      <div class="card">
+        <h2>Финансовые операции</h2>
+        <label>Лимит</label>
+        <input id="auditLimit" type="number" min="1" max="200" value="30" />
+        <button id="loadAuditBtn">Показать операции</button>
+        <pre id="auditOut"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY_STORAGE = "gateway_api_key";
+
+    function getApiKey() {
+      return localStorage.getItem(API_KEY_STORAGE) || "";
+    }
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    async function parseResponse(response) {
+      const raw = await response.text();
+      let data;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = { raw };
+      }
+      if (!response.ok) {
+        const detail = data && data.detail ? data.detail : raw || "Request failed";
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+      return data;
+    }
+
+    async function apiFetch(url, options = {}) {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        throw new Error("API key not found. Please login again.");
+      }
+      const headers = Object.assign({}, options.headers || {}, { "X-Gateway-Key": apiKey });
+      const response = await fetch(url, Object.assign({}, options, { headers }));
+      return parseResponse(response);
+    }
+
+    async function loadProfile() {
+      try {
+        const data = await apiFetch("/gateway/me");
+        setText("profileOut", data);
+      } catch (error) {
+        setText("profileOut", String(error));
+      }
+    }
+
+    async function topup() {
+      try {
+        const tokens = Number(document.getElementById("topupTokens").value || "0");
+        const data = await apiFetch("/gateway/tokens/topup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tokens }),
+        });
+        setText("topupOut", data);
+        await loadProfile();
+      } catch (error) {
+        setText("topupOut", String(error));
+      }
+    }
+
+    async function loadModels() {
+      try {
+        const data = await apiFetch("/gateway/models");
+        const select = document.getElementById("modelSelect");
+        select.innerHTML = "";
+        data.models.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item.model_id;
+          option.textContent = `${item.model_id} (${item.provider})`;
+          select.appendChild(option);
+        });
+        setText("modelsOut", data.models);
+      } catch (error) {
+        setText("modelsOut", String(error));
+      }
+    }
+
+    async function estimate() {
+      try {
+        const payload = {
+          model_id: document.getElementById("modelSelect").value,
+          prompt: document.getElementById("promptInput").value,
+        };
+        const data = await apiFetch("/gateway/estimate-cost", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setText("estimateOut", data);
+      } catch (error) {
+        setText("estimateOut", String(error));
+      }
+    }
+
+    async function generate() {
+      try {
+        const payload = {
+          model_id: document.getElementById("modelSelect").value,
+          prompt: document.getElementById("promptInput").value,
+          temperature: 0.3,
+          max_tokens: 600,
+        };
+        const data = await apiFetch("/gateway/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setText("generateOut", data);
+        await loadProfile();
+      } catch (error) {
+        setText("generateOut", String(error));
+      }
+    }
+
+    async function loadUsage() {
+      try {
+        const limit = Number(document.getElementById("usageLimit").value || "20");
+        const data = await apiFetch(`/gateway/usage?limit=${encodeURIComponent(limit)}`);
+        setText("usageOut", data.items);
+      } catch (error) {
+        setText("usageOut", String(error));
+      }
+    }
+
+    async function loadAudit() {
+      try {
+        const limit = Number(document.getElementById("auditLimit").value || "30");
+        const data = await apiFetch(`/gateway/audit/balance?limit=${encodeURIComponent(limit)}`);
+        setText("auditOut", data.items);
+      } catch (error) {
+        setText("auditOut", String(error));
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem(API_KEY_STORAGE);
+      window.location.href = "/gateway";
+    }
+
+    function bind() {
+      document.getElementById("refreshProfileBtn").addEventListener("click", loadProfile);
+      document.getElementById("topupBtn").addEventListener("click", topup);
+      document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
+      document.getElementById("estimateBtn").addEventListener("click", estimate);
+      document.getElementById("generateBtn").addEventListener("click", generate);
+      document.getElementById("loadUsageBtn").addEventListener("click", loadUsage);
+      document.getElementById("loadAuditBtn").addEventListener("click", loadAudit);
+      document.getElementById("logoutBtn").addEventListener("click", logout);
+    }
+
+    async function boot() {
+      if (!getApiKey()) {
+        window.location.href = "/gateway";
+        return;
+      }
+      bind();
+      await loadModels();
+      await loadProfile();
+    }
+
+    boot();
+  </script>
+</body>
+</html>

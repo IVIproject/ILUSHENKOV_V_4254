@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     ollama_model_alt: str = "llama3.2:3b"
     log_level: str = "INFO"
     admin_api_key: str | None = None
-    gateway_admin_api_key: str | None = None
+    gateway_admin_emails: str = ""
     openai_api_base: str = "https://api.openai.com/v1"
     openai_api_key: str | None = None
 
