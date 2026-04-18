@@ -186,3 +186,23 @@ class GatewayGenerateResponse(BaseModel):
     total_tokens: int
     tokens_spent: int
     token_balance: int
+
+
+class OpenAIModelCard(BaseModel):
+    id: str
+    object: str = "model"
+    created: int
+    owned_by: str
+
+
+class OpenAIModelsResponse(BaseModel):
+    object: str = "list"
+    data: list[OpenAIModelCard]
+
+
+class OpenAIChatCompletionsRequest(BaseModel):
+    model: str = Field(..., min_length=3, max_length=128)
+    messages: list[GatewayChatMessage] = Field(..., min_length=1, max_length=30)
+    max_tokens: int = Field(default=300, ge=1, le=4000)
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    stream: bool = False

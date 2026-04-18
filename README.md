@@ -123,6 +123,31 @@ curl -X POST "http://127.0.0.1:8080/gateway/generate" \
   -d '{"model_id":"proxy/openai-gpt-4o-mini","prompt":"Сделай краткий план запуска сайта"}'
 ```
 
+### OpenAI-compatible endpoints
+
+These endpoints allow using standard OpenAI SDK format directly:
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+Use gateway API key in `Authorization: Bearer ...`
+
+```bash
+curl -X GET "http://127.0.0.1:8080/v1/models" \
+  -H "Authorization: Bearer asv_your_key_here"
+```
+
+```bash
+curl -X POST "http://127.0.0.1:8080/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer asv_your_key_here" \
+  -d '{
+        "model":"local/qwen2.5-3b",
+        "messages":[{"role":"user","content":"Привет, коротко расскажи про VPS"}],
+        "max_tokens": 256
+      }'
+```
+
 Billing is token-based:
 
 - request is accepted only if user has enough balance

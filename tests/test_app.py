@@ -354,3 +354,42 @@ def test_gateway_provider_requires_configured_key():
         assert r.status_code == 502
     finally:
         main_module.settings.openai_api_key = "test-provider-key"
+
+
+def test_openai_compatible_endpoints():
+    _clear_faq_table()
+    register = client.post(
+        "/gateway/register",
+        json={"email": "compat@example.com", "password": "strong-pass-123"},
+    )
+    assert register.status_code == 200
+    api_key = register.json()["api_key"]
+    gw_headers = {"X-Gateway-Key": api_key}
+
+    topup = client.post("/gateway/tokens/topup", headers=gw_headers, json={"tokens": 6000})
+    assert topup.status_code == 200
+
+    compat_headers = {"Authorization": f"Bearer {api_key}"}
+    models_resp = client.get("/v1/models", headers=compat_headers)
+    assert models_resp.status_code == 200
+    ids = [item["id"] for item in models_resp.json()["data"]]
+    assert "local/qwen2.5-3b" in ids
+
+    chat_resp = client.post(
+        "/v1/chat/completions",
+        headers=compat_headers,
+        json={
+            "model": "local/qwen2.5-3b",
+            "messages": [{"role": "user", "content": "Как защитить API?"}],
+            "max_tokens": 120,
+        },
+    )
+    assert chat_resp.status_code == 200
+    payload = chat_resp.json()
+    assert payload["object"] == "chat.completion"
+    assert payload["model"] == "local/qwen2.5-3b"
+    assert payload["choices"][0]["message"]["content"]
+    assert payload["usage"]["total_tokens"] >= 1
+
+    r_unauthorized = client.get("/v1/models")
+    assert r_unauthorized.status_code == 401

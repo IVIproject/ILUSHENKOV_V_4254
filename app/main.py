@@ -133,6 +133,18 @@ def _get_gateway_user(gateway_key: str | None = Header(default=None, alias="X-Ga
     return user
 
 
+def _get_gateway_user_from_bearer(authorization: str | None = Header(default=None, alias="Authorization")) -> GatewayUser:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header is required")
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        raise HTTPException(status_code=401, detail="Authorization must use Bearer token")
+    token = authorization[len(prefix) :].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Bearer token is empty")
+    return _get_gateway_user(token)
+
+
 def _resolve_template_path(template_name: str) -> Path:
     safe = template_name.replace("\\", "/").split("/")[-1].strip()
     if not safe:
