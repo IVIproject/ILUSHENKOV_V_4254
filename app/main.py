@@ -1,8 +1,9 @@
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from ollama import Client
 from sqlalchemy import func, select
@@ -21,17 +22,20 @@ from .schemas import (
     PageTemplateGenerateRequest,
     StatsResponse,
     StreamChunk,
+    SupportDialogsImportRequest,
+    SupportDialogsImportResponse,
     SupportFaqAskRequest,
     SupportFaqAskResponse,
     SupportFaqImportRequest,
     SupportFaqImportResponse,
 )
 from .services import (
+    extract_support_faq_pairs,
     extract_domain_suggestions,
-    render_php_template,
     run_chat_mode,
     run_domain_mode,
     run_support_faq_mode,
+    select_relevant_faq_pairs,
 )
 from .page_templates import (
     build_hosting_template_from_source,
@@ -48,6 +52,30 @@ def _save_log(prompt: str, answer: str) -> None:
     with SessionLocal() as db:
         db.add(RequestLog(prompt=prompt, answer=answer))
         db.commit()
+
+
+def _verify_admin_api_key(
+    api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> None:
+    if not settings.admin_api_key:
+        return
+    if not api_key or api_key != settings.admin_api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
+
+
+def _resolve_template_path(template_name: str) -> Path:
+    safe = template_name.replace("\\", "/").split("/")[-1].strip()
+    if not safe:
+        raise HTTPException(status_code=400, detail="template_name is required")
+    if not safe.endswith(".php"):
+        safe += ".php"
+    if not all(ch.isalnum() or ch in "._-" for ch in safe):
+        raise HTTPException(status_code=400, detail="Invalid template_name")
+
+    template_path = Path("templates/pages") / safe
+    if not template_path.exists() or not template_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Template not found: {safe}")
+    return template_path
 
 
 @asynccontextmanager
@@ -197,7 +225,10 @@ def generate_domains(payload: DomainSuggestionsRequest, request: Request):
 
 
 @app.post("/support/faq/import", response_model=SupportFaqImportResponse)
-def import_support_faq(payload: SupportFaqImportRequest):
+def import_support_faq(
+    payload: SupportFaqImportRequest,
+    _: None = Depends(_verify_admin_api_key),
+):
     try:
         imported = 0
         with SessionLocal() as db:
@@ -226,24 +257,72 @@ def import_support_faq(payload: SupportFaqImportRequest):
         raise HTTPException(status_code=500, detail=f"FAQ import error: {e}")
 
 
+@app.post("/support/dialogs/import", response_model=SupportDialogsImportResponse)
+def import_support_dialogs(
+    payload: SupportDialogsImportRequest,
+    _: None = Depends(_verify_admin_api_key),
+):
+    try:
+        pairs = extract_support_faq_pairs(payload.transcript)
+        if not pairs:
+            return SupportDialogsImportResponse(imported=0, parsed_pairs=0)
+
+        imported = 0
+        with SessionLocal() as db:
+            for question, answer in pairs:
+                q = question.strip()
+                a = answer.strip()
+                if not q or not a:
+                    continue
+                exists = (
+                    db.query(SupportFaqEntry)
+                    .filter(
+                        SupportFaqEntry.question == q,
+                        SupportFaqEntry.answer == a,
+                    )
+                    .first()
+                )
+                if exists:
+                    continue
+                db.add(
+                    SupportFaqEntry(
+                        question=q,
+                        answer=a,
+                        source="support_dialog",
+                    )
+                )
+                imported += 1
+            db.commit()
+
+        return SupportDialogsImportResponse(imported=imported, parsed_pairs=len(pairs))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dialogs import error: {e}")
+
+
 @app.post("/support/faq/ask", response_model=SupportFaqAskResponse)
 def ask_support_faq(payload: SupportFaqAskRequest):
     try:
+        max_items = max(1, min(payload.max_context_items, 20))
         with SessionLocal() as db:
             rows = (
                 db.query(SupportFaqEntry)
                 .order_by(SupportFaqEntry.id.desc())
-                .limit(payload.max_context_items)
+                .limit(200)
                 .all()
             )
+        selected_pairs = select_relevant_faq_pairs(
+            user_question=payload.question,
+            faq_pairs=[(row.question, row.answer) for row in rows],
+            max_items=max_items,
+        )
         answer = run_support_faq_mode(
             client=client,
             model=settings.ollama_model,
             user_question=payload.question,
-            faq_pairs=[(row.question, row.answer) for row in rows],
+            faq_pairs=selected_pairs,
         )
         _save_log(prompt=payload.question, answer=answer)
-        return SupportFaqAskResponse(answer=answer, matched_items=len(rows))
+        return SupportFaqAskResponse(answer=answer, matched_items=len(selected_pairs))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Support FAQ ask error: {e}")
 
@@ -251,13 +330,7 @@ def ask_support_faq(payload: SupportFaqAskRequest):
 @app.post("/page-template/generate-file")
 def generate_page_from_template(payload: PageTemplateGenerateRequest):
     try:
-        template_dir = Path("templates/pages")
-        template_path = template_dir / payload.template_name
-        if not template_path.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Template not found: {payload.template_name}",
-            )
+        template_path = _resolve_template_path(payload.template_name)
         template_text = template_path.read_text(encoding="utf-8")
         generated_php = generate_hosting_page_from_template(
             client=client,
@@ -343,44 +416,42 @@ def run_mode(payload: ModeRunRequest, request: Request):
             return ModeRunResponse(mode=mode, result={"suggestions": suggestions, "zone": zone})
 
         if mode == "php_page":
-            template_html = str(data.get("template_html", ""))
-            content_prompt = str(data.get("content_prompt", "")).strip()
-            if not template_html or not content_prompt:
-                raise HTTPException(
-                    status_code=400,
-                    detail="payload.template_html and payload.content_prompt are required for php_page mode",
-                )
-            rendered = render_php_template(
-                client=client,
-                model=settings.ollama_model,
-                template_html=template_html,
-                prompt=content_prompt,
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "php_page mode is disabled. "
+                    "Use POST /page-template/generate-file for file output."
+                ),
             )
-            _save_log(prompt=content_prompt, answer=rendered)
-            return ModeRunResponse(mode=mode, result={"php_page": rendered})
 
         if mode == "support_faq":
             question = str(data.get("question", "")).strip()
             max_context_items = int(data.get("max_context_items", 5))
             if not question:
                 raise HTTPException(status_code=400, detail="payload.question is required for support_faq mode")
+            safe_context_items = max(1, min(max_context_items, 20))
             with SessionLocal() as db:
                 rows = (
                     db.query(SupportFaqEntry)
                     .order_by(SupportFaqEntry.id.desc())
-                    .limit(max(1, min(max_context_items, 20)))
+                    .limit(200)
                     .all()
                 )
+            selected_pairs = select_relevant_faq_pairs(
+                user_question=question,
+                faq_pairs=[(row.question, row.answer) for row in rows],
+                max_items=safe_context_items,
+            )
             answer = run_support_faq_mode(
                 client=client,
                 model=settings.ollama_model,
                 user_question=question,
-                faq_pairs=[(row.question, row.answer) for row in rows],
+                faq_pairs=selected_pairs,
             )
             _save_log(prompt=question, answer=answer)
             return ModeRunResponse(
                 mode=mode,
-                result={"answer": answer, "matched_items": len(rows)},
+                result={"answer": answer, "matched_items": len(selected_pairs)},
             )
 
         raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")

@@ -62,6 +62,11 @@ class SupportFaqImportResponse(BaseModel):
     imported: int
 
 
+class SupportDialogsImportResponse(BaseModel):
+    imported: int
+    parsed_pairs: int
+
+
 class SupportFaqAskRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=2000)
     max_context_items: int = Field(default=5, ge=1, le=20)
@@ -73,7 +78,7 @@ class SupportFaqAskResponse(BaseModel):
 
 
 class ModeRunRequest(BaseModel):
-    mode: str = Field(..., description="chat | domains | php_page | support_faq")
+    mode: str = Field(..., description="chat | domains | support_faq")
     payload: dict = Field(default_factory=dict)
 
 

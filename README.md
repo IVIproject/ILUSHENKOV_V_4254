@@ -52,7 +52,7 @@ API is available through Nginx at:
 curl http://127.0.0.1:8080/health
 ```
 
-## 4 working modes (single endpoint)
+## 3 working modes (single endpoint)
 
 Unified endpoint:
 
@@ -64,8 +64,7 @@ Supported modes:
 
 1. `chat` - standard assistant response
 2. `domains` - domain list generation without numbering/comments
-3. `php_page` - content generation into provided page template
-4. `support_faq` - support response using imported FAQ history
+3. `support_faq` - support response using imported FAQ history
 
 Mode examples:
 
@@ -80,28 +79,39 @@ curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"domains","payload":{"business_context":"регистрация доменов и хостинг","keywords":["domain","cloud"],"zone":".ru","count":5}}'
 
-# 3) php_page
-curl -X POST "http://127.0.0.1:8080/mode/run" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"php_page","payload":{"template_html":"<html><body><h1>Услуга</h1><div>{{content}}</div></body></html>","content_prompt":"Подготовь текст для страницы услуги VPS"}}'
-
-# 4) support_faq
+# 3) support_faq
 curl -X POST "http://127.0.0.1:8080/mode/run" \
   -H "Content-Type: application/json" \
   -d '{"mode":"support_faq","payload":{"question":"Как продлить домен?","max_context_items":5}}'
 ```
 
-FAQ import examples:
+### PHP page generation (file output only)
+
+`php_page` mode is intentionally disabled in `/mode/run`.
+Use the dedicated endpoint below to generate and download a `.php` file from a named template:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/page-template/generate-file" \
+  -H "Content-Type: application/json" \
+  -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст страницы хостинга","output_filename":"hosting-generated.php"}' \
+  --output hosting-generated.php
+```
+
+### FAQ import examples
+
+If `ADMIN_API_KEY` is configured in `.env`, include the header `X-API-Key`.
 
 ```bash
 # structured FAQ import
 curl -X POST "http://127.0.0.1:8080/support/faq/import" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-admin-key" \
   -d '{"items":[{"question":"Как продлить домен?","answer":"Продление доступно в личном кабинете.","source":"support_chat"}]}'
 
 # import from support transcript text
 curl -X POST "http://127.0.0.1:8080/support/dialogs/import" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-admin-key" \
   -d '{"transcript":"Q: Как продлить домен?\nA: Через личный кабинет."}'
 ```
 

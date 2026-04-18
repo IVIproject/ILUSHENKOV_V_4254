@@ -17,7 +17,7 @@ class RequestLog(Base):
 
 
 class SupportFaqEntry(Base):
-    __tablename__ = "faq_entries"
+    __tablename__ = "support_faq_entries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
