@@ -1,4 +1,6 @@
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 
@@ -7,6 +9,74 @@ def normalize_zone(zone: str) -> str:
     if not z.startswith("."):
         z = "." + z
     return z
+
+
+def _extract_json_object(raw: str) -> dict[str, str]:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return {}
+    candidate = text[start : end + 1]
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return {}
+    result: dict[str, str] = {}
+    if isinstance(parsed, dict):
+        for k, v in parsed.items():
+            if isinstance(k, str):
+                result[k] = str(v)
+    return result
+
+
+def _template_root() -> Path:
+    return Path(__file__).resolve().parent.parent / "templates" / "pages"
+
+
+def render_named_php_template(
+    client: Any,
+    model: str,
+    template_name: str,
+    content_prompt: str,
+) -> tuple[str, str]:
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "", template_name)
+    if not safe_name:
+        raise ValueError("Invalid template_name")
+    template_path = _template_root() / f"{safe_name}.php"
+    if not template_path.exists():
+        raise FileNotFoundError(f"Template not found: {safe_name}.php")
+
+    template_text = template_path.read_text(encoding="utf-8")
+    placeholders = sorted(set(re.findall(r"\{\{([A-Z0-9_]+)\}\}", template_text)))
+    if not placeholders:
+        return template_text, f"{safe_name}-generated.php"
+
+    prompt = (
+        "You are generating content for a PHP page template.\n"
+        "Return ONLY valid JSON object with values for placeholders.\n"
+        "Do not include markdown, comments, or code fences.\n"
+        "Keep answers concise and suitable for website page copy.\n"
+        f"Task: {content_prompt}\n"
+        f"Placeholders: {', '.join(placeholders)}\n"
+    )
+    resp = client.chat(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = resp["message"]["content"]
+    replacements = _extract_json_object(raw)
+
+    fallback_text = content_prompt.strip() or "Content will be provided later."
+    rendered = template_text
+    for key in placeholders:
+        value = replacements.get(key, fallback_text)
+        rendered = rendered.replace(f"{{{{{key}}}}}", value)
+
+    return rendered, f"{safe_name}-generated.php"
 
 
 def _parse_domain_candidates(raw_text: str, zone: str, count: int) -> list[str]:

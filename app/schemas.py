@@ -82,6 +82,16 @@ class ModeRunResponse(BaseModel):
     result: dict
 
 
+class PageTemplateGenerateRequest(BaseModel):
+    template_name: str = Field(..., min_length=3, max_length=200)
+    content_prompt: str = Field(..., min_length=5, max_length=3000)
+    output_filename: str = Field(default="generated-page.php", min_length=5, max_length=200)
+
+
+class SupportDialogsImportRequest(BaseModel):
+    transcript: str = Field(..., min_length=10, max_length=200000)
+
+
 class StatsResponse(BaseModel):
     total_requests: int
     requests_last_24h: int

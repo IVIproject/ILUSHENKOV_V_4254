@@ -18,6 +18,7 @@ from .schemas import (
     HistoryItem,
     ModeRunRequest,
     ModeRunResponse,
+    PageTemplateGenerateRequest,
     StatsResponse,
     StreamChunk,
     SupportFaqAskRequest,
@@ -31,6 +32,10 @@ from .services import (
     run_chat_mode,
     run_domain_mode,
     run_support_faq_mode,
+)
+from .page_templates import (
+    build_hosting_template_from_source,
+    generate_hosting_page_from_template,
 )
 from .settings import settings
 
@@ -241,6 +246,61 @@ def ask_support_faq(payload: SupportFaqAskRequest):
         return SupportFaqAskResponse(answer=answer, matched_items=len(rows))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Support FAQ ask error: {e}")
+
+
+@app.post("/page-template/generate-file")
+def generate_page_from_template(payload: PageTemplateGenerateRequest):
+    try:
+        template_dir = Path("templates/pages")
+        template_path = template_dir / payload.template_name
+        if not template_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Template not found: {payload.template_name}",
+            )
+        template_text = template_path.read_text(encoding="utf-8")
+        generated_php = generate_hosting_page_from_template(
+            client=client,
+            model=settings.ollama_model,
+            template_text=template_text,
+            content_prompt=payload.content_prompt,
+        )
+        output_name = payload.output_filename
+        if not output_name.endswith(".php"):
+            output_name += ".php"
+        return StreamingResponse(
+            iter([generated_php.encode("utf-8")]),
+            media_type="application/x-httpd-php",
+            headers={
+                "Content-Disposition": f'attachment; filename="{output_name}"',
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Template generation error: {e}")
+
+
+@app.post("/page-template/prepare-hosting")
+def prepare_hosting_template():
+    try:
+        source = Path("hosting.php")
+        if not source.exists():
+            raise HTTPException(status_code=404, detail="hosting.php not found")
+        template_dir = Path("templates/pages")
+        template_dir.mkdir(parents=True, exist_ok=True)
+        output = template_dir / "hosting.template.php"
+        content = source.read_text(encoding="utf-8")
+        template_text = build_hosting_template_from_source(content)
+        output.write_text(template_text, encoding="utf-8")
+        return {
+            "prepared": True,
+            "template_path": str(output),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Template prepare error: {e}")
 
 
 @app.post("/mode/run", response_model=ModeRunResponse)
