@@ -153,6 +153,14 @@ def call_openai_proxy(
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured on gateway")
 
+    base_url = (getattr(settings, "openai_base_url", None) or settings.openai_api_base).strip()
+    if not base_url:
+        raise RuntimeError("OPENAI API base URL is not configured")
+    if base_url.endswith("/chat/completions"):
+        target_url = base_url
+    else:
+        target_url = f"{base_url.rstrip('/')}/chat/completions"
+
     payload = {
         "model": model,
         "messages": messages,
@@ -161,7 +169,7 @@ def call_openai_proxy(
     }
     body = json.dumps(payload).encode("utf-8")
     req = request.Request(
-        url=settings.openai_base_url,
+        url=target_url,
         data=body,
         headers={
             "Authorization": f"Bearer {settings.openai_api_key}",

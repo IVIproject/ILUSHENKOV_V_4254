@@ -8,7 +8,7 @@ os.environ["GATEWAY_PROVIDER_API_KEY"] = "test-provider-key"
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.db import Base, engine
-from app.models import SupportFaqEntry, SupportFaqQueryMetric, GatewayModel, GatewayUser
+from app.models import SupportFaqEntry, SupportFaqQueryMetric, GatewayModel, GatewayUser, GatewayUsageLog
 
 class FakeClient:
     def list(self):
@@ -54,6 +54,7 @@ Base.metadata.create_all(bind=engine)
 def _clear_faq_table():
     with main_module.SessionLocal() as db:
         db.query(SupportFaqQueryMetric).delete()
+        db.query(GatewayUsageLog).delete()
         db.query(SupportFaqEntry).delete()
         db.query(GatewayModel).delete()
         db.query(GatewayUser).delete()
@@ -329,6 +330,94 @@ def test_gateway_register_models_and_generate():
     assert out["provider"] == "ollama"
     assert out["tokens_spent"] > 0
     assert out["token_balance"] < 5000
+
+
+def test_gateway_login_me_and_usage():
+    _clear_faq_table()
+    register = client.post(
+        "/gateway/register",
+        json={"email": "login@example.com", "password": "strong-pass-123", "tariff_code": "business"},
+    )
+    assert register.status_code == 200
+    api_key = register.json()["api_key"]
+
+    login = client.post(
+        "/gateway/login",
+        json={"email": "login@example.com", "password": "strong-pass-123"},
+    )
+    assert login.status_code == 200
+    assert login.json()["api_key"] == api_key
+    headers = {"X-Gateway-Key": api_key}
+
+    me = client.get("/gateway/me", headers=headers)
+    assert me.status_code == 200
+    me_payload = me.json()
+    assert me_payload["email"] == "login@example.com"
+    assert me_payload["tariff_code"] == "business"
+
+    topup = client.post("/gateway/tokens/topup", headers=headers, json={"tokens": 6000})
+    assert topup.status_code == 200
+
+    generate = client.post(
+        "/gateway/generate",
+        headers=headers,
+        json={"model_id": "local/qwen2.5-3b", "prompt": "Тест usage", "max_tokens": 100},
+    )
+    assert generate.status_code == 200
+
+    usage = client.get("/gateway/usage?limit=5", headers=headers)
+    assert usage.status_code == 200
+    items = usage.json()["items"]
+    assert len(items) >= 1
+    assert items[0]["model_id"] == "local/qwen2.5-3b"
+    assert items[0]["tokens_spent"] >= 1
+
+
+def test_gateway_admin_manage_users():
+    _clear_faq_table()
+    previous_gateway_admin = main_module.settings.gateway_admin_api_key
+    previous_admin = main_module.settings.admin_api_key
+    main_module.settings.gateway_admin_api_key = "gateway-admin-test-key"
+    main_module.settings.admin_api_key = None
+    try:
+        register = client.post(
+            "/gateway/register",
+            json={"email": "admin-managed@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+        )
+        assert register.status_code == 200
+        user_id = register.json()["user_id"]
+
+        admin_headers = {"X-Gateway-Admin-Key": "gateway-admin-test-key"}
+
+        list_resp = client.get("/gateway/admin/users", headers=admin_headers)
+        assert list_resp.status_code == 200
+        assert list_resp.json()["total_count"] >= 1
+
+        update = client.patch(
+            f"/gateway/admin/users/{user_id}",
+            headers=admin_headers,
+            json={
+                "tariff_code": "pro",
+                "set_balance_tokens": 12345,
+                "is_active": False,
+                "regenerate_api_key": True,
+            },
+        )
+        assert update.status_code == 200
+        updated = update.json()
+        assert updated["tariff_code"] == "pro"
+        assert updated["token_balance"] == 12345
+        assert updated["is_active"] is False
+
+        usage = client.get(f"/gateway/admin/users/{user_id}/usage", headers=admin_headers)
+        assert usage.status_code == 200
+        assert isinstance(usage.json()["items"], list)
+
+        unauthorized = client.get("/gateway/admin/users")
+        assert unauthorized.status_code == 401
+    finally:
+        main_module.settings.gateway_admin_api_key = previous_gateway_admin
+        main_module.settings.admin_api_key = previous_admin
 
 
 def test_gateway_provider_requires_configured_key():
