@@ -1,6 +1,6 @@
 COMPOSE=docker compose
 
-.PHONY: up down rebuild logs ps test api db-migrate health benchmark benchmark-domains
+.PHONY: up down rebuild logs ps test api db-migrate health benchmark benchmark-domains benchmark-modes
 
 up:
 	$(COMPOSE) up -d --build
@@ -35,3 +35,6 @@ benchmark:
 
 benchmark-domains:
 	python3 scripts/benchmark_api.py --url http://127.0.0.1:8080/generate/domains --requests 20 --warmup 3 --out docs/results/benchmark-domains.json
+
+benchmark-modes:
+	python3 scripts/benchmark_api.py --url http://127.0.0.1:8080/mode/run --requests 20 --warmup 3 --out docs/results/benchmark-modes.json

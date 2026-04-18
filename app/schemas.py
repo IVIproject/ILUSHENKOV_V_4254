@@ -1,9 +1,11 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
- 
+
+
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
  
+
 class GenerateResponse(BaseModel):
     answer: str
 
@@ -35,6 +37,49 @@ class DomainSuggestionsResponse(BaseModel):
     business_context: str
     zone: str
     suggestions: list[str]
+
+
+class PhpTemplateRequest(BaseModel):
+    template_html: str = Field(..., min_length=20, max_length=50000)
+    content_prompt: str = Field(..., min_length=5, max_length=2000)
+
+
+class PhpTemplateResponse(BaseModel):
+    php_page: str
+
+
+class SupportFaqImportItem(BaseModel):
+    question: str = Field(..., min_length=3, max_length=2000)
+    answer: str = Field(..., min_length=3, max_length=4000)
+    source: str = Field(default="support_chat", min_length=2, max_length=100)
+
+
+class SupportFaqImportRequest(BaseModel):
+    items: list[SupportFaqImportItem] = Field(..., min_length=1, max_length=500)
+
+
+class SupportFaqImportResponse(BaseModel):
+    imported: int
+
+
+class SupportFaqAskRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=2000)
+    max_context_items: int = Field(default=5, ge=1, le=20)
+
+
+class SupportFaqAskResponse(BaseModel):
+    answer: str
+    matched_items: int
+
+
+class ModeRunRequest(BaseModel):
+    mode: str = Field(..., description="chat | domains | php_page | support_faq")
+    payload: dict = Field(default_factory=dict)
+
+
+class ModeRunResponse(BaseModel):
+    mode: str
+    result: dict
 
 
 class StatsResponse(BaseModel):

@@ -37,7 +37,7 @@ Expected:
 curl -X POST "http://127.0.0.1:8080/generate/domains" \
   -H "Content-Type: application/json" \
   -d '{
-    "company": "онлайн платформа для регистрации доменов и хостинга",
+    "business_context": "онлайн платформа для регистрации доменов и хостинга",
     "keywords": ["domain", "hosting", "cloud"],
     "zone": ".ru",
     "count": 5
@@ -45,7 +45,7 @@ curl -X POST "http://127.0.0.1:8080/generate/domains" \
 ```
 
 Expected:
-- JSON with `domains` list and generated names ending with `.ru`
+- JSON with `suggestions` list and generated names ending with `.ru`
 
 ### 4. Show generic generation endpoint
 ```bash
@@ -75,6 +75,37 @@ Expected:
 - total requests count
 - average prompt length
 - average answer length
+
+### 8. Demonstrate unified 4-mode endpoint
+```bash
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"chat","payload":{"prompt":"Напиши короткое приветствие для клиента"}}'
+```
+
+```bash
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"domains","payload":{"business_context":"VPS и домены","zone":".ru","count":3}}'
+```
+
+```bash
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"php_page","payload":{"template_html":"<html><body><h1>Title</h1><div><!--CONTENT--></div></body></html>","content_prompt":"Текст для страницы услуги VPS"}}'
+```
+
+```bash
+curl -X POST "http://127.0.0.1:8080/support/faq/import" \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"question":"Как продлить домен?","answer":"Продление доступно в личном кабинете.","source":"support_chat"}]}'
+```
+
+```bash
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"support_faq","payload":{"question":"Как продлить домен?"}}'
+```
 
 ## Interpretation for defense
 - System works as an internal AI service for corporate workflows.
