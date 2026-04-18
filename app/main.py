@@ -20,9 +20,11 @@ from .gateway_services import (
     hash_password,
     normalize_email,
     resolve_gateway_model,
+    verify_password,
 )
 from .logging_config import get_logger, setup_logging
 from .models import (
+    GatewayBalanceAuditLog,
     GatewayModel,
     GatewayUsageLog,
     GatewayUser,
@@ -33,17 +35,26 @@ from .models import (
 from .schemas import (
     DomainSuggestionsRequest,
     DomainSuggestionsResponse,
+    GatewayAdminUserItem,
+    GatewayAdminUserUpdateRequest,
+    GatewayAdminUsersResponse,
+    GatewayBalanceAuditItem,
+    GatewayBalanceAuditResponse,
     GatewayBalanceResponse,
     GatewayCatalogResponse,
     GatewayChatRequest,
     GatewayChatResponse,
     GatewayGenerateRequest,
     GatewayGenerateResponse,
+    GatewayLoginRequest,
+    GatewayMeResponse,
     GatewayModelItem,
     GatewayTariffItem,
     GatewayTariffsResponse,
     GatewayTopUpRequest,
     GatewayTopUpResponse,
+    GatewayUsageLogItem,
+    GatewayUsageLogsResponse,
     GatewayUserRegisterRequest,
     GatewayUserResponse,
     GenerateRequest,
@@ -121,6 +132,22 @@ def _verify_admin_api_key(
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
 
 
+def _verify_gateway_admin_key(
+    admin_key: str | None = Header(default=None, alias="X-Gateway-Admin-Key"),
+) -> None:
+    expected = settings.gateway_admin_api_key or settings.admin_api_key
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Gateway admin key is not configured. "
+                "Set GATEWAY_ADMIN_API_KEY (or ADMIN_API_KEY) in .env."
+            ),
+        )
+    if not admin_key or admin_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Gateway-Admin-Key")
+
+
 def _get_gateway_user(gateway_key: str | None = Header(default=None, alias="X-Gateway-Key")) -> GatewayUser:
     if not gateway_key:
         raise HTTPException(status_code=401, detail="X-Gateway-Key header is required")
@@ -145,6 +172,59 @@ def _get_gateway_user_from_bearer(authorization: str | None = Header(default=Non
     if not token:
         raise HTTPException(status_code=401, detail="Bearer token is empty")
     return _get_gateway_user(token)
+
+
+def _verify_gateway_user_password(user: GatewayUser, password: str) -> bool:
+    if not user.password_hash:
+        return False
+    parts = user.password_hash.split("$", 1)
+    if len(parts) != 2:
+        return False
+    salt, digest = parts
+    if not salt or not digest:
+        return False
+    return verify_password(password, salt, digest)
+
+
+def _log_balance_audit(
+    *,
+    db,
+    user_id: int,
+    action: str,
+    delta_tokens: int,
+    balance_before: int,
+    balance_after: int,
+    actor: str,
+    actor_reference: str | None = None,
+    reason: str | None = None,
+) -> None:
+    db.add(
+        GatewayBalanceAuditLog(
+            user_id=user_id,
+            action=action,
+            delta_tokens=delta_tokens,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            actor=actor,
+            actor_reference=actor_reference,
+            reason=reason,
+        )
+    )
+
+
+def _to_balance_audit_item(row: GatewayBalanceAuditLog) -> GatewayBalanceAuditItem:
+    return GatewayBalanceAuditItem(
+        id=row.id,
+        user_id=row.user_id,
+        action=row.action,
+        delta_tokens=row.delta_tokens,
+        balance_before=row.balance_before,
+        balance_after=row.balance_after,
+        actor=row.actor,
+        actor_reference=row.actor_reference,
+        reason=row.reason,
+        created_at=row.created_at,
+    )
 
 
 def _resolve_template_path(template_name: str) -> Path:
@@ -341,7 +421,8 @@ def gateway_register(payload: GatewayUserRegisterRequest):
     if not plan:
         raise HTTPException(status_code=400, detail=f"Unsupported tariff_code: {payload.tariff_code}")
 
-    _, password_hash = hash_password(payload.password)
+    password_salt, password_digest = hash_password(payload.password)
+    password_hash = f"{password_salt}${password_digest}"
     api_key, _, _, _ = generate_api_key()
     with SessionLocal() as db:
         exists = db.query(GatewayUser).filter(GatewayUser.email == email).first()
@@ -364,7 +445,268 @@ def gateway_register(payload: GatewayUserRegisterRequest):
             api_key=user.api_key,
             token_balance=user.tokens_balance,
             tariff_code=user.plan,
+            is_active=user.is_active,
         )
+
+
+@app.post("/gateway/login", response_model=GatewayUserResponse)
+def gateway_login(payload: GatewayLoginRequest):
+    email = normalize_email(payload.email)
+    with SessionLocal() as db:
+        user = db.query(GatewayUser).filter(GatewayUser.email == email).first()
+        if not user or not _verify_gateway_user_password(user, payload.password):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="Gateway user is inactive")
+        return GatewayUserResponse(
+            user_id=user.id,
+            email=user.email,
+            api_key=user.api_key,
+            token_balance=user.tokens_balance,
+            tariff_code=user.plan,
+            is_active=user.is_active,
+        )
+
+
+@app.get("/gateway/me", response_model=GatewayMeResponse)
+def gateway_me(user: GatewayUser = Depends(_get_gateway_user)):
+    return GatewayMeResponse(
+        user_id=user.id,
+        email=user.email,
+        tariff_code=user.plan,
+        token_balance=user.tokens_balance,
+        is_active=user.is_active,
+        created_at=user.created_at,
+    )
+
+
+@app.get("/gateway/usage", response_model=GatewayUsageLogsResponse)
+def gateway_usage(limit: int = Query(20, ge=1, le=200), user: GatewayUser = Depends(_get_gateway_user)):
+    with SessionLocal() as db:
+        rows = (
+            db.query(GatewayUsageLog)
+            .filter(GatewayUsageLog.user_id == user.id)
+            .order_by(GatewayUsageLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+    return GatewayUsageLogsResponse(
+        items=[
+            GatewayUsageLogItem(
+                id=row.id,
+                model_id=row.model_key,
+                provider=row.provider,
+                prompt_tokens=row.prompt_tokens,
+                completion_tokens=row.completion_tokens,
+                total_tokens=row.total_tokens,
+                tokens_spent=row.cost_tokens,
+                success=row.success,
+                error_message=row.error_message,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+    )
+
+
+@app.get("/gateway/audit/balance", response_model=GatewayBalanceAuditResponse)
+def gateway_balance_audit(limit: int = Query(20, ge=1, le=200), user: GatewayUser = Depends(_get_gateway_user)):
+    with SessionLocal() as db:
+        rows = (
+            db.query(GatewayBalanceAuditLog)
+            .filter(GatewayBalanceAuditLog.user_id == user.id)
+            .order_by(GatewayBalanceAuditLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+    return GatewayBalanceAuditResponse(
+        items=[_to_balance_audit_item(row) for row in rows]
+    )
+
+
+@app.get("/gateway/admin/users", response_model=GatewayAdminUsersResponse)
+def gateway_admin_users(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    search: str | None = Query(default=None, min_length=1, max_length=255),
+    include_inactive: bool = Query(default=False),
+    _: None = Depends(_verify_gateway_admin_key),
+):
+    with SessionLocal() as db:
+        base_query = db.query(GatewayUser)
+        if not include_inactive:
+            base_query = base_query.filter(GatewayUser.is_active.is_(True))
+        if search:
+            email_like = f"%{search.strip().lower()}%"
+            base_query = base_query.filter(func.lower(GatewayUser.email).like(email_like))
+
+        total_count = base_query.count()
+        users = (
+            base_query.order_by(GatewayUser.id.asc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        usage_map: dict[int, tuple[int, int, datetime | None]] = {}
+        user_ids = [row.id for row in users]
+        if user_ids:
+            usage_rows = (
+                db.query(
+                    GatewayUsageLog.user_id,
+                    func.count(GatewayUsageLog.id),
+                    func.coalesce(func.sum(GatewayUsageLog.cost_tokens), 0),
+                    func.max(GatewayUsageLog.created_at),
+                )
+                .filter(GatewayUsageLog.user_id.in_(user_ids))
+                .group_by(GatewayUsageLog.user_id)
+                .all()
+            )
+            usage_map = {
+                int(row[0]): (int(row[1] or 0), int(row[2] or 0), row[3])
+                for row in usage_rows
+            }
+
+    return GatewayAdminUsersResponse(
+        total_count=total_count,
+        users=[
+            GatewayAdminUserItem(
+                user_id=row.id,
+                email=row.email,
+                tariff_code=row.plan,
+                token_balance=row.tokens_balance,
+                is_active=row.is_active,
+                created_at=row.created_at,
+                total_requests=usage_map.get(row.id, (0, 0, None))[0],
+                total_tokens_spent=usage_map.get(row.id, (0, 0, None))[1],
+                last_usage_at=usage_map.get(row.id, (0, 0, None))[2],
+            )
+            for row in users
+        ],
+    )
+
+
+@app.patch("/gateway/admin/users/{user_id}", response_model=GatewayUserResponse)
+def gateway_admin_update_user(
+    user_id: int,
+    payload: GatewayAdminUserUpdateRequest,
+    _: None = Depends(_verify_gateway_admin_key),
+):
+    plans = {plan.code for plan in get_tariff_plans()}
+    with SessionLocal() as db:
+        user_row = db.query(GatewayUser).filter(GatewayUser.id == user_id).first()
+        if not user_row:
+            raise HTTPException(status_code=404, detail="Gateway user not found")
+        original_balance = int(user_row.tokens_balance)
+
+        if payload.email is not None:
+            normalized_email = normalize_email(payload.email)
+            exists = (
+                db.query(GatewayUser)
+                .filter(GatewayUser.email == normalized_email, GatewayUser.id != user_row.id)
+                .first()
+            )
+            if exists:
+                raise HTTPException(status_code=409, detail="Email already registered by another user")
+            user_row.email = normalized_email
+
+        if payload.tariff_code is not None:
+            if payload.tariff_code not in plans:
+                raise HTTPException(status_code=400, detail=f"Unsupported tariff_code: {payload.tariff_code}")
+            user_row.plan = payload.tariff_code
+
+        if payload.set_balance_tokens is not None:
+            user_row.tokens_balance = payload.set_balance_tokens
+
+        if payload.add_tokens is not None:
+            updated_balance = user_row.tokens_balance + payload.add_tokens
+            if updated_balance < 0:
+                raise HTTPException(status_code=400, detail="Resulting token balance cannot be negative")
+            user_row.tokens_balance = updated_balance
+
+        if int(user_row.tokens_balance) != original_balance:
+            _log_balance_audit(
+                db=db,
+                user_id=user_row.id,
+                action="admin_adjustment",
+                delta_tokens=int(user_row.tokens_balance) - original_balance,
+                balance_before=original_balance,
+                balance_after=int(user_row.tokens_balance),
+                actor="admin",
+                actor_reference="gateway-admin",
+                reason=payload.balance_reason or "Admin balance update",
+            )
+
+        if payload.is_active is not None:
+            user_row.is_active = payload.is_active
+
+        if payload.regenerate_api_key:
+            new_key, _, _, _ = generate_api_key()
+            user_row.api_key = new_key
+
+        db.commit()
+        db.refresh(user_row)
+        return GatewayUserResponse(
+            user_id=user_row.id,
+            email=user_row.email,
+            api_key=user_row.api_key,
+            token_balance=user_row.tokens_balance,
+            tariff_code=user_row.plan,
+            is_active=user_row.is_active,
+        )
+
+
+@app.get("/gateway/admin/users/{user_id}/usage", response_model=GatewayUsageLogsResponse)
+def gateway_admin_user_usage(
+    user_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    _: None = Depends(_verify_gateway_admin_key),
+):
+    with SessionLocal() as db:
+        exists = db.query(GatewayUser.id).filter(GatewayUser.id == user_id).first()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Gateway user not found")
+        rows = (
+            db.query(GatewayUsageLog)
+            .filter(GatewayUsageLog.user_id == user_id)
+            .order_by(GatewayUsageLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+    return GatewayUsageLogsResponse(
+        items=[
+            GatewayUsageLogItem(
+                id=row.id,
+                model_id=row.model_key,
+                provider=row.provider,
+                prompt_tokens=row.prompt_tokens,
+                completion_tokens=row.completion_tokens,
+                total_tokens=row.total_tokens,
+                tokens_spent=row.cost_tokens,
+                success=row.success,
+                error_message=row.error_message,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+    )
+
+
+@app.get("/gateway/admin/audit/balance", response_model=GatewayBalanceAuditResponse)
+def gateway_admin_balance_audit(
+    limit: int = Query(100, ge=1, le=500),
+    user_id: int | None = Query(default=None, ge=1),
+    _: None = Depends(_verify_gateway_admin_key),
+):
+    with SessionLocal() as db:
+        query = db.query(GatewayBalanceAuditLog)
+        if user_id is not None:
+            exists = db.query(GatewayUser.id).filter(GatewayUser.id == user_id).first()
+            if not exists:
+                raise HTTPException(status_code=404, detail="Gateway user not found")
+            query = query.filter(GatewayBalanceAuditLog.user_id == user_id)
+        rows = query.order_by(GatewayBalanceAuditLog.id.desc()).limit(limit).all()
+    return GatewayBalanceAuditResponse(items=[_to_balance_audit_item(row) for row in rows])
 
 
 @app.get("/gateway/models", response_model=GatewayCatalogResponse)
@@ -416,7 +758,19 @@ def gateway_tokens_topup(payload: GatewayTopUpRequest, user: GatewayUser = Depen
         row = db.query(GatewayUser).filter(GatewayUser.id == user.id).first()
         if not row:
             raise HTTPException(status_code=404, detail="Gateway user not found")
+        balance_before = int(row.tokens_balance)
         row.tokens_balance += payload.tokens
+        _log_balance_audit(
+            db=db,
+            user_id=row.id,
+            action="self_topup",
+            delta_tokens=int(payload.tokens),
+            balance_before=balance_before,
+            balance_after=int(row.tokens_balance),
+            actor="user",
+            actor_reference=row.email,
+            reason="Manual top-up from gateway cabinet/API",
+        )
         db.commit()
         db.refresh(row)
         return GatewayTopUpResponse(user_id=row.id, token_balance=row.tokens_balance)

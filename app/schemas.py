@@ -116,12 +116,27 @@ class GatewayUserRegisterRequest(BaseModel):
     tariff_code: str = Field(default="starter", min_length=3, max_length=32)
 
 
+class GatewayLoginRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=1, max_length=255)
+
+
 class GatewayUserResponse(BaseModel):
     user_id: int
     email: str
     api_key: str
     token_balance: int
     tariff_code: str
+    is_active: bool = True
+
+
+class GatewayMeResponse(BaseModel):
+    user_id: int
+    email: str
+    tariff_code: str
+    token_balance: int
+    is_active: bool
+    created_at: datetime
 
 
 class GatewayTopUpRequest(BaseModel):
@@ -150,6 +165,67 @@ class GatewayBalanceResponse(BaseModel):
     user_id: int
     token_balance: int
     tariff_code: str
+
+
+class GatewayUsageLogItem(BaseModel):
+    id: int
+    model_id: str
+    provider: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    tokens_spent: int
+    success: bool
+    error_message: str | None = None
+    created_at: datetime
+
+
+class GatewayUsageLogsResponse(BaseModel):
+    items: list[GatewayUsageLogItem]
+
+
+class GatewayBalanceAuditItem(BaseModel):
+    id: int
+    user_id: int
+    action: str
+    delta_tokens: int
+    balance_before: int
+    balance_after: int
+    actor: str
+    actor_reference: str | None = None
+    reason: str | None = None
+    created_at: datetime
+
+
+class GatewayBalanceAuditResponse(BaseModel):
+    items: list[GatewayBalanceAuditItem]
+
+
+class GatewayAdminUserItem(BaseModel):
+    user_id: int
+    email: str
+    tariff_code: str
+    token_balance: int
+    is_active: bool
+    created_at: datetime
+    total_requests: int
+    total_tokens_spent: int
+    last_usage_at: datetime | None = None
+
+
+class GatewayAdminUsersResponse(BaseModel):
+    total_count: int
+    users: list[GatewayAdminUserItem]
+
+
+class GatewayAdminUserUpdateRequest(BaseModel):
+    email: str | None = Field(default=None, min_length=5, max_length=255)
+    tariff_code: str | None = Field(default=None, min_length=3, max_length=32)
+    set_balance_tokens: int | None = Field(default=None, ge=0, le=50_000_000)
+    add_tokens: int | None = Field(default=None, ge=-5_000_000, le=5_000_000)
+    balance_reason: str | None = Field(default=None, min_length=2, max_length=255)
+    is_active: bool | None = None
+    regenerate_api_key: bool = False
 
 
 class GatewayModelItem(BaseModel):
