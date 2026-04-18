@@ -3,23 +3,37 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Администратор — Пользователи</title>
+  <title>AI Gateway — Управление пользователями</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
     .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px 56px; }
     .header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+    .nav { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom: 14px; }
+    .nav a, .nav button { text-decoration:none; border:1px solid #334155; border-radius:8px; padding:8px 12px; color:#e2e8f0; background:#0b1220; cursor:pointer; font-size:14px; }
+    .nav a.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
     .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
     .inline-group { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .nav a, .nav button { text-decoration:none; border:1px solid #334155; border-radius:8px; padding:8px 10px; color:#e2e8f0; background:#0b1220; }
-    .nav a.active { background:#2563eb; border-color:#2563eb; color:#fff; }
     label { display: block; margin-top: 8px; color: #cbd5e1; font-size:14px; }
-    input, button, select { width: 100%; margin-top: 6px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px 12px; }
+    input, button, select {
+      width: 100%; margin-top: 6px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #334155;
+      background: #0b1220; color: #e2e8f0; padding: 10px 12px;
+    }
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     input[type="number"] { -moz-appearance: textfield; appearance:textfield; }
+
+    select {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      background-image: none;
+      padding-right: 12px;
+    }
+    select::-ms-expand { display: none; }
+
     button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
     button.inline { width: auto; padding: 6px 10px; margin: 0; font-size: 12px; }
     button.secondary { background: #374151; }
@@ -34,31 +48,37 @@
   <div class="container">
     <div class="header">
       <div>
-        <h1>Администратор — Пользователи</h1>
-        <p class="small">Управление ролью, балансом, активностью и удалением.</p>
-      </div>
-      <div class="inline-group nav">
-        <a href="/gateway/admin">Обзор</a>
-        <a href="/gateway/admin/users/ui" class="active">Пользователи</a>
-        <a href="/gateway/admin/finance/ui">Финансы</a>
-        <button id="logoutBtn" class="secondary">Выйти</button>
+        <h1>Управление пользователями</h1>
+        <p class="small">Редактирование роли, активности, API-ключа и удаление.</p>
       </div>
     </div>
+
+    <nav class="nav">
+      <a href="/gateway/register">Регистрация</a>
+      <a href="/gateway/login">Авторизация</a>
+      <a href="/gateway/profile">Профиль</a>
+      <a href="/gateway/models/page">Модели</a>
+      <a href="/gateway/history">История</a>
+      <a href="/gateway/admin" class="active">Управление</a>
+      <button id="logoutBtn" type="button">Выйти</button>
+    </nav>
+
     <section class="card">
       <div class="grid">
         <div>
-          <label>Поиск email</label>
+          <label for="searchInput">Поиск email</label>
           <input id="searchInput" placeholder="user@example.com" />
         </div>
         <div>
-          <label>Лимит</label>
+          <label for="limitInput">Лимит</label>
           <input id="limitInput" type="number" min="1" max="200" value="50" />
         </div>
       </div>
       <label><input id="includeInactiveInput" type="checkbox" style="width:auto; margin-right:8px;" />Показывать неактивных</label>
-      <button id="loadBtn">Поиск</button>
+      <button id="loadBtn" type="button">Поиск</button>
       <div id="tableWrap"></div>
     </section>
+
     <section class="card">
       <h2>Результат действий</h2>
       <pre id="out"></pre>
@@ -68,12 +88,9 @@
   <script>
     const API_KEY_STORAGE = "gateway_api_key";
 
-    function getApiKey() {
-      return localStorage.getItem(API_KEY_STORAGE) || "";
-    }
-    function setText(id, value) {
-      document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    }
+    function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ""; }
+    function setText(id, value) { document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); }
+
     async function parseResponse(response) {
       const raw = await response.text();
       let data;
@@ -84,6 +101,7 @@
       }
       return data;
     }
+
     async function apiFetch(url, options = {}) {
       const key = getApiKey();
       if (!key) throw new Error("Сначала выполните вход.");
@@ -98,20 +116,13 @@
       wrap.style.gap = "6px";
 
       const role = document.createElement("select");
-      [["user","Пользователь"], ["admin","Администратор"]].forEach(([r, label]) => {
+      [["user", "Пользователь"], ["admin", "Администратор"]].forEach(([r, label]) => {
         const option = document.createElement("option");
         option.value = r;
         option.textContent = label;
         if (r === user.role) option.selected = true;
         role.appendChild(option);
       });
-
-      const addTokens = document.createElement("input");
-      addTokens.type = "text";
-      addTokens.placeholder = "Изменение баланса (токены)";
-      addTokens.value = "0";
-      addTokens.style.margin = "0";
-      addTokens.setAttribute("inputmode", "numeric");
 
       const active = document.createElement("label");
       active.className = "small";
@@ -123,12 +134,7 @@
       updateBtn.textContent = "Сохранить";
       updateBtn.onclick = async () => {
         try {
-          const payload = {
-            role: role.value,
-            is_active: activeInput.checked,
-            add_tokens: Number(addTokens.value || "0"),
-          };
-          if (payload.add_tokens === 0) delete payload.add_tokens;
+          const payload = { role: role.value, is_active: activeInput.checked };
           const result = await apiFetch(`/gateway/admin/users/${user.user_id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -153,6 +159,23 @@
         }
       };
 
+      const regenBtn = document.createElement("button");
+      regenBtn.className = "inline secondary";
+      regenBtn.textContent = "Новый API-ключ";
+      regenBtn.onclick = async () => {
+        try {
+          const result = await apiFetch(`/gateway/admin/users/${user.user_id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ regenerate_api_key: true }),
+          });
+          setText("out", result);
+          await loadUsers();
+        } catch (error) {
+          setText("out", String(error));
+        }
+      };
+
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "inline secondary";
       deleteBtn.textContent = "Удалить";
@@ -168,10 +191,10 @@
       };
 
       wrap.appendChild(role);
-      wrap.appendChild(addTokens);
       wrap.appendChild(active);
       wrap.appendChild(updateBtn);
       wrap.appendChild(usageBtn);
+      wrap.appendChild(regenBtn);
       wrap.appendChild(deleteBtn);
       return wrap;
     }
@@ -181,24 +204,21 @@
         const limit = Number(document.getElementById("limitInput").value || "50");
         const search = document.getElementById("searchInput").value.trim();
         const includeInactive = document.getElementById("includeInactiveInput").checked;
-        const params = new URLSearchParams({
-          limit: String(limit),
-          offset: "0",
-          include_inactive: String(includeInactive),
-        });
+        const params = new URLSearchParams({ limit: String(limit), offset: "0", include_inactive: String(includeInactive) });
         if (search) params.set("search", search);
         const data = await apiFetch(`/gateway/admin/users?${params.toString()}`);
+
         const wrap = document.getElementById("tableWrap");
         wrap.innerHTML = "";
         const table = document.createElement("table");
-        table.innerHTML = "<thead><tr><th>ID / Email</th><th>Роль / Баланс</th><th>Действия</th></tr></thead><tbody></tbody>";
+        table.innerHTML = "<thead><tr><th>ID / Email</th><th>Роль / Статус</th><th>Действия</th></tr></thead><tbody></tbody>";
         const tbody = table.querySelector("tbody");
         data.users.forEach((u) => {
           const row = document.createElement("tr");
           const c1 = document.createElement("td");
           c1.innerHTML = `<div><strong>#${u.user_id}</strong></div><div>${u.email}</div>`;
           const c2 = document.createElement("td");
-          c2.innerHTML = `<div>${u.role}</div><div>${u.token_balance.toLocaleString("ru-RU")} токенов</div>`;
+          c2.innerHTML = `<div>${u.role}</div><div>${u.is_active ? "активен" : "неактивен"}</div>`;
           const c3 = document.createElement("td");
           c3.appendChild(buildActions(u));
           row.appendChild(c1);
@@ -208,7 +228,7 @@
         });
         wrap.appendChild(table);
       } catch (error) {
-        setText("tableWrap", String(error));
+        setText("out", String(error));
       }
     }
 
@@ -218,6 +238,7 @@
       localStorage.removeItem("gateway_user_role");
       window.location.href = "/gateway/login";
     });
+
     loadUsers();
   </script>
 </body>

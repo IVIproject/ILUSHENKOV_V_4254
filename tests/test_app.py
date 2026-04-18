@@ -14,7 +14,6 @@ from app.models import (
     GatewayModel,
     GatewayUser,
     GatewayUsageLog,
-    GatewayBalanceAuditLog,
 )
 
 class FakeClient:
@@ -62,7 +61,6 @@ Base.metadata.create_all(bind=engine)
 def _clear_faq_table():
     with main_module.SessionLocal() as db:
         db.query(SupportFaqQueryMetric).delete()
-        db.query(GatewayBalanceAuditLog).delete()
         db.query(GatewayUsageLog).delete()
         db.query(SupportFaqEntry).delete()
         db.query(GatewayModel).delete()
@@ -311,15 +309,10 @@ def test_gateway_register_models_and_generate():
     )
     assert register.status_code == 200
     data = register.json()
-    assert data["token_balance"] == 0
     assert data["api_key"]
 
     gateway_key = data["api_key"]
     headers = {"X-Gateway-Key": gateway_key}
-
-    topup = client.post("/gateway/tokens/topup", headers=headers, json={"tokens": 5000})
-    assert topup.status_code == 200
-    assert topup.json()["token_balance"] == 5000
 
     models_resp = client.get("/gateway/models", headers=headers)
     assert models_resp.status_code == 200
@@ -338,14 +331,13 @@ def test_gateway_register_models_and_generate():
     assert "answer" in out
     assert out["provider"] == "ollama"
     assert out["tokens_spent"] > 0
-    assert out["token_balance"] < 5000
 
 
 def test_gateway_login_me_and_usage():
     _clear_faq_table()
     register = client.post(
         "/gateway/register",
-        json={"email": "login@example.com", "password": "strong-pass-123", "tariff_code": "business"},
+        json={"email": "login@example.com", "password": "strong-pass-123"},
     )
     assert register.status_code == 200
     api_key = register.json()["api_key"]
@@ -362,10 +354,7 @@ def test_gateway_login_me_and_usage():
     assert me.status_code == 200
     me_payload = me.json()
     assert me_payload["email"] == "login@example.com"
-    assert me_payload["tariff_code"] in {"business", "default"}
-
-    topup = client.post("/gateway/tokens/topup", headers=headers, json={"tokens": 6000})
-    assert topup.status_code == 200
+    assert me_payload["is_active"] is True
 
     generate = client.post(
         "/gateway/generate",
@@ -391,8 +380,6 @@ def test_gateway_login_reports_legacy_password_format():
                 password_hash="legacyhashwithoutseparator",
                 api_key="asv_legacy_login_key",
                 role="user",
-                plan="starter",
-                tokens_balance=100,
                 is_active=True,
             )
         )
@@ -415,8 +402,6 @@ def test_gateway_register_recovers_legacy_account():
                 password_hash="legacyhashwithoutseparator",
                 api_key="asv_legacy_register_key",
                 role="user",
-                plan="starter",
-                tokens_balance=777,
                 is_active=False,
             )
         )
@@ -430,7 +415,6 @@ def test_gateway_register_recovers_legacy_account():
     payload = register.json()
     assert payload["email"] == "legacy-register@example.com"
     assert payload["is_active"] is True
-    assert payload["token_balance"] == 777
     assert payload["api_key"] == "asv_legacy_register_key"
 
     login = client.post(
@@ -441,65 +425,6 @@ def test_gateway_register_recovers_legacy_account():
     assert login.json()["user_id"] == payload["user_id"]
 
 
-def test_gateway_balance_audit_user_and_admin():
-    _clear_faq_table()
-    previous_gateway_emails = main_module.settings.gateway_admin_emails
-    main_module.settings.gateway_admin_emails = "admin@example.com"
-    try:
-        admin_register = client.post(
-            "/gateway/register",
-            json={"email": "admin@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
-        )
-        assert admin_register.status_code == 200
-        admin_headers = {"X-Gateway-Key": admin_register.json()["api_key"]}
-
-        register = client.post(
-            "/gateway/register",
-            json={"email": "audit@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
-        )
-        assert register.status_code == 200
-        user_payload = register.json()
-        user_id = user_payload["user_id"]
-        user_headers = {"X-Gateway-Key": user_payload["api_key"]}
-
-        topup = client.post("/gateway/tokens/topup", headers=user_headers, json={"tokens": 1500})
-        assert topup.status_code == 200
-
-        user_audit = client.get("/gateway/audit/balance?limit=10", headers=user_headers)
-        assert user_audit.status_code == 200
-        user_items = user_audit.json()["items"]
-        assert len(user_items) >= 1
-        assert user_items[0]["action"] == "self_topup"
-        assert user_items[0]["delta_tokens"] == 1500
-        assert user_items[0]["actor"] == "user"
-
-        update = client.patch(
-            f"/gateway/admin/users/{user_id}",
-            headers=admin_headers,
-            json={"add_tokens": 300, "balance_reason": "bonus for testing"},
-        )
-        assert update.status_code == 200
-
-        admin_audit = client.get("/gateway/admin/audit/balance?limit=20", headers=admin_headers)
-        assert admin_audit.status_code == 200
-        all_items = admin_audit.json()["items"]
-        assert any(item["action"] == "admin_adjustment" for item in all_items)
-        adjusted = next(item for item in all_items if item["action"] == "admin_adjustment")
-        assert adjusted["actor"] == "admin"
-        assert adjusted["reason"] == "bonus for testing"
-
-        filtered = client.get(
-            f"/gateway/admin/audit/balance?limit=20&user_id={user_id}",
-            headers=admin_headers,
-        )
-        assert filtered.status_code == 200
-        filtered_items = filtered.json()["items"]
-        assert len(filtered_items) >= 2
-        assert all(item["user_id"] == user_id for item in filtered_items)
-    finally:
-        main_module.settings.gateway_admin_emails = previous_gateway_emails
-
-
 def test_gateway_admin_manage_users():
     _clear_faq_table()
     previous_gateway_emails = main_module.settings.gateway_admin_emails
@@ -507,14 +432,14 @@ def test_gateway_admin_manage_users():
     try:
         admin_register = client.post(
             "/gateway/register",
-            json={"email": "admin@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+            json={"email": "admin@example.com", "password": "strong-pass-123"},
         )
         assert admin_register.status_code == 200
         admin_headers = {"X-Gateway-Key": admin_register.json()["api_key"]}
 
         register = client.post(
             "/gateway/register",
-            json={"email": "admin-managed@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+            json={"email": "admin-managed@example.com", "password": "strong-pass-123"},
         )
         assert register.status_code == 200
         user_id = register.json()["user_id"]
@@ -527,17 +452,14 @@ def test_gateway_admin_manage_users():
             f"/gateway/admin/users/{user_id}",
             headers=admin_headers,
             json={
-                "tariff_code": "pro",
-                "set_balance_tokens": 12345,
-                "balance_reason": "switching to paid plan",
+                "role": "admin",
                 "is_active": False,
                 "regenerate_api_key": True,
             },
         )
         assert update.status_code == 200
         updated = update.json()
-        assert updated["tariff_code"] == "pro"
-        assert updated["token_balance"] == 12345
+        assert updated["role"] == "admin"
         assert updated["is_active"] is False
 
         usage = client.get(f"/gateway/admin/users/{user_id}/usage", headers=admin_headers)
@@ -554,21 +476,21 @@ def test_gateway_admin_manage_users():
         main_module.settings.gateway_admin_emails = previous_gateway_emails
 
 
-def test_gateway_model_pricing_and_cost_estimate():
+def test_gateway_model_pricing_update_and_generate():
     _clear_faq_table()
     previous_gateway_emails = main_module.settings.gateway_admin_emails
     main_module.settings.gateway_admin_emails = "admin@example.com"
     try:
         admin_register = client.post(
             "/gateway/register",
-            json={"email": "admin@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+            json={"email": "admin@example.com", "password": "strong-pass-123"},
         )
         assert admin_register.status_code == 200
         admin_headers = {"X-Gateway-Key": admin_register.json()["api_key"]}
 
         user_register = client.post(
             "/gateway/register",
-            json={"email": "price-user@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+            json={"email": "price-user@example.com", "password": "strong-pass-123"},
         )
         assert user_register.status_code == 200
         user_headers = {"X-Gateway-Key": user_register.json()["api_key"]}
@@ -587,16 +509,13 @@ def test_gateway_model_pricing_and_cost_estimate():
         assert update_resp.status_code == 200
         assert update_resp.json()["price_per_1k_tokens"] >= 42.0
 
-        estimate_resp = client.post(
-            "/gateway/estimate-cost",
+        generate_resp = client.post(
+            "/gateway/generate",
             headers=user_headers,
-            json={"model_id": model_id, "prompt": "Тест оценки цены"},
+            json={"model_id": model_id, "prompt": "Тест цены", "max_tokens": 120},
         )
-        assert estimate_resp.status_code == 200
-        estimate = estimate_resp.json()
-        assert estimate["estimated_prompt_tokens"] >= 1
-        assert estimate["estimated_total_tokens"] >= estimate["estimated_prompt_tokens"]
-        assert estimate["estimated_tokens_to_charge"] >= 1
+        assert generate_resp.status_code == 200
+        assert generate_resp.json()["tokens_spent"] >= 1
     finally:
         main_module.settings.gateway_admin_emails = previous_gateway_emails
 
@@ -613,9 +532,6 @@ def test_gateway_provider_requires_configured_key():
         key = register.json()["api_key"]
         headers = {"X-Gateway-Key": key}
 
-        topup = client.post("/gateway/tokens/topup", headers=headers, json={"tokens": 5000})
-        assert topup.status_code == 200
-
         r = client.post(
             "/gateway/generate",
             headers=headers,
@@ -626,52 +542,6 @@ def test_gateway_provider_requires_configured_key():
         main_module.settings.openai_api_key = "test-provider-key"
 
 
-def test_gateway_admin_model_pricing_and_estimate():
-    _clear_faq_table()
-    previous_gateway_emails = main_module.settings.gateway_admin_emails
-    main_module.settings.gateway_admin_emails = "admin@example.com"
-    try:
-        admin_register = client.post(
-            "/gateway/register",
-            json={"email": "admin@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
-        )
-        assert admin_register.status_code == 200
-        admin_headers = {"X-Gateway-Key": admin_register.json()["api_key"]}
-
-        user_register = client.post(
-            "/gateway/register",
-            json={"email": "price-user@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
-        )
-        assert user_register.status_code == 200
-        user_headers = {"X-Gateway-Key": user_register.json()["api_key"]}
-
-        admin_models = client.get("/gateway/admin/models", headers=admin_headers)
-        assert admin_models.status_code == 200
-        models = admin_models.json()["models"]
-        assert len(models) >= 1
-        target_model = models[0]["model_id"]
-
-        update_model = client.patch(
-            f"/gateway/admin/models/{target_model}",
-            headers=admin_headers,
-            json={"price_per_1k_tokens": 2.5, "markup_percent": 10.0},
-        )
-        assert update_model.status_code == 200
-        assert update_model.json()["price_per_1k_tokens"] >= 2.5
-
-        estimate = client.post(
-            "/gateway/estimate-cost",
-            headers=user_headers,
-            json={"model_id": target_model, "prompt": "Расскажи про VPS просто"},
-        )
-        assert estimate.status_code == 200
-        payload = estimate.json()
-        assert payload["estimated_total_tokens"] >= payload["estimated_prompt_tokens"]
-        assert payload["estimated_tokens_to_charge"] >= 1
-    finally:
-        main_module.settings.gateway_admin_emails = previous_gateway_emails
-
-
 def test_gateway_admin_create_and_delete_model():
     _clear_faq_table()
     previous_gateway_emails = main_module.settings.gateway_admin_emails
@@ -679,7 +549,7 @@ def test_gateway_admin_create_and_delete_model():
     try:
         admin_register = client.post(
             "/gateway/register",
-            json={"email": "admin@example.com", "password": "strong-pass-123", "tariff_code": "starter"},
+            json={"email": "admin@example.com", "password": "strong-pass-123"},
         )
         assert admin_register.status_code == 200
         admin_headers = {"X-Gateway-Key": admin_register.json()["api_key"]}
@@ -721,10 +591,6 @@ def test_openai_compatible_endpoints():
     )
     assert register.status_code == 200
     api_key = register.json()["api_key"]
-    gw_headers = {"X-Gateway-Key": api_key}
-
-    topup = client.post("/gateway/tokens/topup", headers=gw_headers, json={"tokens": 6000})
-    assert topup.status_code == 200
 
     compat_headers = {"Authorization": f"Bearer {api_key}"}
     models_resp = client.get("/v1/models", headers=compat_headers)
@@ -750,3 +616,4 @@ def test_openai_compatible_endpoints():
 
     r_unauthorized = client.get("/v1/models")
     assert r_unauthorized.status_code == 401
+

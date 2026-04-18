@@ -52,19 +52,15 @@ API is available through Nginx at:
 curl http://127.0.0.1:8080/health
 ```
 
-## OpenRouter-like gateway (cabinet + billing + admin)
+## OpenRouter-like gateway (cabinet + admin)
 
-New gateway capabilities:
+Current gateway capabilities:
 
-- user registration and API key issuance
+- user registration and login with API key issuance
 - model catalog with local and external provider routing
-- pay-per-token balance accounting
-- external proxy to OpenAI-compatible upstream (for example ChatGPT)
-- separated pages:
-  - `/gateway` - login and registration only
-  - `/gateway/profile` - user cabinet
-  - `/gateway/admin` - admin cabinet
-- balance audit log for each financial operation
+- OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`)
+- separate pages with unified navigation menu
+- role-based admin access by email list (`GATEWAY_ADMIN_EMAILS`)
 
 ### Gateway setup
 
@@ -84,84 +80,32 @@ Notes:
 - if `OPENAI_API_KEY` is empty, proxy model calls return provider error.
 - `OPENAI_BASE_URL` may be either API base (`https://api.openai.com/v1`) or full chat-completions URL.
 - admin role is assigned by email list in `GATEWAY_ADMIN_EMAILS`.
-- if a user logs in with email from `GATEWAY_ADMIN_EMAILS`, they get admin access.
 
-### Browser usage (step-by-step)
+### Browser routes
 
-#### 1) Login/registration page
+- `http://127.0.0.1:8080/gateway` -> auto-redirect to `/gateway/login`
+- `http://127.0.0.1:8080/gateway/register` -> registration page
+- `http://127.0.0.1:8080/gateway/login` -> login page
+- `http://127.0.0.1:8080/gateway/profile` -> user profile page
+- `http://127.0.0.1:8080/gateway/models/page` -> models list
+- `http://127.0.0.1:8080/gateway/model/{model_id}` -> model details + request form
+- `http://127.0.0.1:8080/gateway/history` -> request history
+- `http://127.0.0.1:8080/gateway/admin` -> admin section
+- `http://127.0.0.1:8080/gateway/admin/users/ui` -> user management
+- `http://127.0.0.1:8080/gateway/admin/models/ui` -> model management
 
-Open:
-
-- `http://127.0.0.1:8080/gateway`
-
-This page has only 2 forms:
-
-- registration
-- login
-
-No user/admin switching there.
-
-#### 2) User cabinet
-
-After login as normal user you go to:
-
-- `http://127.0.0.1:8080/gateway/profile`
-
-Available actions:
-
-1. Save API key to browser localStorage.
-2. Refresh profile and balance.
-3. Top up token balance.
-4. Load models list.
-5. Enter prompt and call model.
-6. See estimated request price before sending (`POST /gateway/estimate-cost`).
-7. See usage logs and financial operations.
-
-#### 3) Admin cabinet
-
-If your email is in `GATEWAY_ADMIN_EMAILS`, after login you can open:
-
-- `http://127.0.0.1:8080/gateway/admin`
-
-Admin actions:
-
-1. User management:
-   - change email / role / labels
-   - set or add/subtract balance
-   - deactivate/activate
-   - regenerate API key
-   - delete user (`DELETE /gateway/admin/users/{user_id}`)
-2. Model pricing management:
-   - edit `price_per_1k_tokens`
-   - for external providers: set `external_price_per_1k_tokens` and `markup_percent`
-   - disable/enable model
-3. Usage and financial audit:
-   - per-user usage
-   - global balance audit
-   - audit filtered by `user_id`
+All pages use a shared menu. For admin users, menu includes `Управление`.
 
 ### Register user and get API key (API example)
 
 ```bash
-curl -X POST "http://127.0.0.1:8080/gateway/register" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"strong-pass-123","tariff_code":"default"}'
-```
-
-Top up test balance:
-
-```bash
-curl -X POST "http://127.0.0.1:8080/gateway/tokens/topup" \
-  -H "Content-Type: application/json" \
-  -H "X-Gateway-Key: asv_your_key_here" \
-  -d '{"tokens":100000}'
+curl -X POST "http://127.0.0.1:8080/gateway/register"   -H "Content-Type: application/json"   -d '{"email":"user@example.com","password":"strong-pass-123"}'
 ```
 
 List models:
 
 ```bash
-curl -X GET "http://127.0.0.1:8080/gateway/models" \
-  -H "X-Gateway-Key: asv_your_key_here"
+curl -X GET "http://127.0.0.1:8080/gateway/models"   -H "X-Gateway-Key: asv_your_key_here"
 ```
 
 ### Gateway inference
@@ -169,19 +113,33 @@ curl -X GET "http://127.0.0.1:8080/gateway/models" \
 Local model:
 
 ```bash
-curl -X POST "http://127.0.0.1:8080/gateway/generate" \
-  -H "Content-Type: application/json" \
-  -H "X-Gateway-Key: asv_your_key_here" \
-  -d '{"model_id":"local/qwen2.5-3b","prompt":"Привет, коротко расскажи про VPS"}'
+curl -X POST "http://127.0.0.1:8080/gateway/generate"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_your_key_here"   -d '{"model_id":"local/qwen2.5-3b","prompt":"Привет, коротко расскажи про VPS"}'
 ```
 
 Proxy model (OpenAI upstream):
 
 ```bash
-curl -X POST "http://127.0.0.1:8080/gateway/generate" \
-  -H "Content-Type: application/json" \
-  -H "X-Gateway-Key: asv_your_key_here" \
-  -d '{"model_id":"proxy/openai-gpt-4o-mini","prompt":"Сделай краткий план запуска сайта"}'
+curl -X POST "http://127.0.0.1:8080/gateway/generate"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_your_key_here"   -d '{"model_id":"proxy/openai-gpt-4o-mini","prompt":"Сделай краткий план запуска сайта"}'
+```
+
+### Admin API examples
+
+List users:
+
+```bash
+curl -X GET "http://127.0.0.1:8080/gateway/admin/users?limit=50"   -H "X-Gateway-Key: asv_admin_key_here"
+```
+
+Update user role/activity:
+
+```bash
+curl -X PATCH "http://127.0.0.1:8080/gateway/admin/users/5"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_admin_key_here"   -d '{"role":"admin","is_active":true}'
+```
+
+Delete user:
+
+```bash
+curl -X DELETE "http://127.0.0.1:8080/gateway/admin/users/5"   -H "X-Gateway-Key: asv_admin_key_here"
 ```
 
 ### OpenAI-compatible endpoints
@@ -194,60 +152,15 @@ These endpoints allow using standard OpenAI SDK format directly:
 Use gateway API key in `Authorization: Bearer ...`
 
 ```bash
-curl -X GET "http://127.0.0.1:8080/v1/models" \
-  -H "Authorization: Bearer asv_your_key_here"
+curl -X GET "http://127.0.0.1:8080/v1/models"   -H "Authorization: Bearer asv_your_key_here"
 ```
 
 ```bash
-curl -X POST "http://127.0.0.1:8080/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer asv_your_key_here" \
-  -d '{
+curl -X POST "http://127.0.0.1:8080/v1/chat/completions"   -H "Content-Type: application/json"   -H "Authorization: Bearer asv_your_key_here"   -d '{
         "model":"local/qwen2.5-3b",
         "messages":[{"role":"user","content":"Привет, коротко расскажи про VPS"}],
         "max_tokens": 256
       }'
-```
-
-Billing is token-based:
-
-- request is accepted only if user has enough balance
-- `tokens_spent` is deducted from account
-- usage transaction is saved in `gateway_usage_logs`
-- financial transactions are saved in `gateway_balance_audit_logs`
-
-### Prompt price estimate (before generate)
-
-Get approximate cost before request:
-
-```bash
-curl -X POST "http://127.0.0.1:8080/gateway/estimate-cost" \
-  -H "Content-Type: application/json" \
-  -H "X-Gateway-Key: asv_your_key_here" \
-  -d '{"model_id":"local/qwen2.5-3b","prompt":"Коротко расскажи про VPS"}'
-```
-
-### Balance audit endpoints
-
-User own audit:
-
-```bash
-curl -X GET "http://127.0.0.1:8080/gateway/audit/balance?limit=30" \
-  -H "X-Gateway-Key: asv_your_key_here"
-```
-
-Admin all audits:
-
-```bash
-curl -X GET "http://127.0.0.1:8080/gateway/admin/audit/balance?limit=100" \
-  -H "X-Gateway-Key: asv_admin_key_here"
-```
-
-Admin filtered by user:
-
-```bash
-curl -X GET "http://127.0.0.1:8080/gateway/admin/audit/balance?limit=100&user_id=5" \
-  -H "X-Gateway-Key: asv_admin_key_here"
 ```
 
 ## 3 working modes (single endpoint)
