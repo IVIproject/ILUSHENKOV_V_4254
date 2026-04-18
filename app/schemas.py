@@ -102,4 +102,9 @@ class StatsResponse(BaseModel):
     requests_last_24h: int
     average_prompt_length: float
     average_answer_length: float
+    support_faq_total_requests: int
+    support_faq_zero_match_total: int
+    support_faq_no_match_rate: float
+    support_faq_avg_relevance_score: float
+    support_faq_top_questions: list[str]
     latest_request_at: datetime | None = None

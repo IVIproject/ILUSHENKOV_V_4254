@@ -7,7 +7,7 @@ os.environ["LOG_LEVEL"] = "INFO"
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.db import Base, engine
-from app.models import SupportFaqEntry
+from app.models import SupportFaqEntry, SupportFaqQueryMetric
 
 class FakeClient:
     def list(self):
@@ -48,6 +48,7 @@ Base.metadata.create_all(bind=engine)
 
 def _clear_faq_table():
     with main_module.SessionLocal() as db:
+        db.query(SupportFaqQueryMetric).delete()
         db.query(SupportFaqEntry).delete()
         db.commit()
 
@@ -106,6 +107,10 @@ def test_stats():
     assert "total_requests" in data
     assert data["total_requests"] >= 1
     assert "requests_last_24h" in data
+    assert "support_faq_total_requests" in data
+    assert "support_faq_no_match_rate" in data
+    assert "support_faq_avg_relevance_score" in data
+    assert isinstance(data["support_faq_top_questions"], list)
 
 
 def test_mode_chat():
@@ -231,6 +236,12 @@ def test_support_faq_relevance_limit():
     assert r.status_code == 200
     assert r.json()["matched_items"] == 1
 
+    stats = client.get("/stats")
+    assert stats.status_code == 200
+    metrics = stats.json()
+    assert metrics["support_faq_total_requests"] >= 1
+    assert metrics["support_faq_avg_relevance_score"] >= 0.0
+
 
 def test_admin_api_key_protects_import_endpoints():
     _clear_faq_table()
@@ -242,8 +253,8 @@ def test_admin_api_key_protects_import_endpoints():
             json={
                 "items": [
                     {
-                        "question": "Q1",
-                        "answer": "A1",
+                        "question": "Question one",
+                        "answer": "Answer one",
                         "source": "support_chat",
                     }
                 ]

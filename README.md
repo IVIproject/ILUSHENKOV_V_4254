@@ -115,6 +115,46 @@ curl -X POST "http://127.0.0.1:8080/support/dialogs/import" \
   -d '{"transcript":"Q: Как продлить домен?\nA: Через личный кабинет."}'
 ```
 
+### How `ADMIN_API_KEY` works (simple)
+
+`ADMIN_API_KEY` protects only admin-like import endpoints:
+
+- `POST /support/faq/import`
+- `POST /support/dialogs/import`
+
+If `ADMIN_API_KEY` is empty in `.env`, these endpoints work **without** a key.
+
+If `ADMIN_API_KEY` is set, each import request must include:
+
+```http
+X-API-Key: <your key from .env>
+```
+
+Quick setup:
+
+1. Open `.env` and set:
+
+```env
+ADMIN_API_KEY=my-secret-key-123
+```
+
+2. Restart API:
+
+```bash
+docker compose up -d --build
+```
+
+3. Use key in request:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/support/faq/import" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: my-secret-key-123" \
+  -d '{"items":[{"question":"Как продлить домен?","answer":"Через личный кабинет.","source":"support_chat"}]}'
+```
+
+Without key (or with wrong key) API returns `401`.
+
 - Generic text generation:
 
 ```bash
@@ -150,6 +190,14 @@ curl "http://127.0.0.1:8080/history?limit=5"
 ```bash
 curl "http://127.0.0.1:8080/stats"
 ```
+
+`/stats` now also includes FAQ quality metrics:
+
+- `support_faq_total_requests` - number of support FAQ requests evaluated
+- `support_faq_zero_match_total` - count of requests with zero overlap to FAQ context
+- `support_faq_no_match_rate` - share of requests with zero overlap to FAQ context
+- `support_faq_avg_relevance_score` - average overlap score (higher is better)
+- `support_faq_top_questions` - most frequent normalized support questions
 
 ## Migrations (Alembic)
 

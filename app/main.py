@@ -6,11 +6,11 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from ollama import Client
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 
 from .db import Base, SessionLocal, engine
 from .logging_config import get_logger, setup_logging
-from .models import RequestLog, SupportFaqEntry
+from .models import RequestLog, SupportFaqEntry, SupportFaqQueryMetric
 from .schemas import (
     DomainSuggestionsRequest,
     DomainSuggestionsResponse,
@@ -36,6 +36,7 @@ from .services import (
     run_domain_mode,
     run_support_faq_mode,
     select_relevant_faq_pairs,
+    normalize_text_for_metric,
 )
 from .page_templates import (
     build_hosting_template_from_source,
@@ -51,6 +52,31 @@ client = Client(host=settings.ollama_host)
 def _save_log(prompt: str, answer: str) -> None:
     with SessionLocal() as db:
         db.add(RequestLog(prompt=prompt, answer=answer))
+        db.commit()
+
+
+def _save_support_quality_log(
+    *,
+    question: str,
+    matched_items: int,
+    relevance_avg: float,
+    relevance_max: float,
+    zero_match: bool,
+    source_mode: str,
+) -> None:
+    normalized = normalize_text_for_metric(question)
+    with SessionLocal() as db:
+        db.add(
+            SupportFaqQueryMetric(
+                question=question,
+                normalized_question=normalized,
+                matched_items=matched_items,
+                relevance_avg=relevance_avg,
+                relevance_max=relevance_max,
+                zero_match=zero_match,
+                source_mode=source_mode,
+            )
+        )
         db.commit()
 
 
@@ -179,12 +205,40 @@ def stats():
                 .limit(1)
                 .scalar()
             )
+
+            total_support_questions = db.query(func.count(SupportFaqQueryMetric.id)).scalar() or 0
+            zero_match_count = (
+                db.query(func.count(SupportFaqQueryMetric.id))
+                .filter(SupportFaqQueryMetric.zero_match.is_(True))
+                .scalar()
+                or 0
+            )
+            avg_relevance = db.query(func.avg(SupportFaqQueryMetric.relevance_avg)).scalar()
+
+            top_rows = (
+                db.query(
+                    SupportFaqQueryMetric.normalized_question,
+                    func.count(SupportFaqQueryMetric.id).label("cnt"),
+                )
+                .group_by(SupportFaqQueryMetric.normalized_question)
+                .order_by(desc("cnt"))
+                .limit(5)
+                .all()
+            )
+            top_questions = [row[0] for row in top_rows if row[0]]
+
+        no_match_rate = (float(zero_match_count) / float(total_support_questions)) if total_support_questions else 0.0
         return StatsResponse(
             total_requests=int(total_requests),
             requests_last_24h=int(requests_last_24h or 0),
             average_prompt_length=float(avg_prompt_length or 0.0),
             average_answer_length=float(avg_answer_length or 0.0),
             latest_request_at=latest,
+            support_faq_total_requests=int(total_support_questions),
+            support_faq_zero_match_total=int(zero_match_count),
+            support_faq_no_match_rate=float(no_match_rate),
+            support_faq_avg_relevance_score=float(avg_relevance or 0.0),
+            support_faq_top_questions=top_questions,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stats error: {e}")
@@ -315,13 +369,25 @@ def ask_support_faq(payload: SupportFaqAskRequest):
             faq_pairs=[(row.question, row.answer) for row in rows],
             max_items=max_items,
         )
+        scores = [item.score for item in selected_pairs]
+        relevance_avg = (sum(scores) / len(scores)) if scores else 0.0
+        relevance_max = max(scores) if scores else 0.0
+        zero_match = relevance_max <= 0
         answer = run_support_faq_mode(
             client=client,
             model=settings.ollama_model,
             user_question=payload.question,
-            faq_pairs=selected_pairs,
+            faq_pairs=[item.pair for item in selected_pairs],
         )
         _save_log(prompt=payload.question, answer=answer)
+        _save_support_quality_log(
+            question=payload.question,
+            matched_items=len(selected_pairs),
+            relevance_avg=float(relevance_avg),
+            relevance_max=float(relevance_max),
+            zero_match=zero_match,
+            source_mode="support_faq",
+        )
         return SupportFaqAskResponse(answer=answer, matched_items=len(selected_pairs))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Support FAQ ask error: {e}")
@@ -442,13 +508,25 @@ def run_mode(payload: ModeRunRequest, request: Request):
                 faq_pairs=[(row.question, row.answer) for row in rows],
                 max_items=safe_context_items,
             )
+            scores = [item.score for item in selected_pairs]
+            relevance_avg = (sum(scores) / len(scores)) if scores else 0.0
+            relevance_max = max(scores) if scores else 0.0
+            zero_match = relevance_max <= 0
             answer = run_support_faq_mode(
                 client=client,
                 model=settings.ollama_model,
                 user_question=question,
-                faq_pairs=selected_pairs,
+                faq_pairs=[item.pair for item in selected_pairs],
             )
             _save_log(prompt=question, answer=answer)
+            _save_support_quality_log(
+                question=question,
+                matched_items=len(selected_pairs),
+                relevance_avg=float(relevance_avg),
+                relevance_max=float(relevance_max),
+                zero_match=zero_match,
+                source_mode="mode_run",
+            )
             return ModeRunResponse(
                 mode=mode,
                 result={"answer": answer, "matched_items": len(selected_pairs)},
