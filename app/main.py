@@ -3,17 +3,49 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from ollama import Client
 from sqlalchemy import desc, func, select
 
 from .db import Base, SessionLocal, engine
+from .gateway_services import (
+    call_openai_proxy,
+    compute_token_charge,
+    estimate_messages_tokens,
+    estimate_text_tokens,
+    generate_api_key,
+    get_gateway_models,
+    get_tariff_plans,
+    hash_password,
+    normalize_email,
+    resolve_gateway_model,
+)
 from .logging_config import get_logger, setup_logging
-from .models import RequestLog, SupportFaqEntry, SupportFaqQueryMetric
+from .models import (
+    GatewayModel,
+    GatewayUsageLog,
+    GatewayUser,
+    RequestLog,
+    SupportFaqEntry,
+    SupportFaqQueryMetric,
+)
 from .schemas import (
     DomainSuggestionsRequest,
     DomainSuggestionsResponse,
+    GatewayBalanceResponse,
+    GatewayCatalogResponse,
+    GatewayChatRequest,
+    GatewayChatResponse,
+    GatewayGenerateRequest,
+    GatewayGenerateResponse,
+    GatewayModelItem,
+    GatewayTariffItem,
+    GatewayTariffsResponse,
+    GatewayTopUpRequest,
+    GatewayTopUpResponse,
+    GatewayUserRegisterRequest,
+    GatewayUserResponse,
     GenerateRequest,
     GenerateResponse,
     HistoryItem,
@@ -87,6 +119,32 @@ def _verify_admin_api_key(
         return
     if not api_key or api_key != settings.admin_api_key:
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
+
+
+def _get_gateway_user(gateway_key: str | None = Header(default=None, alias="X-Gateway-Key")) -> GatewayUser:
+    if not gateway_key:
+        raise HTTPException(status_code=401, detail="X-Gateway-Key header is required")
+    with SessionLocal() as db:
+        user = (
+            db.query(GatewayUser)
+            .filter(GatewayUser.api_key == gateway_key.strip(), GatewayUser.is_active.is_(True))
+            .first()
+        )
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid gateway key")
+    return user
+
+
+def _get_gateway_user_from_bearer(authorization: str | None = Header(default=None, alias="Authorization")) -> GatewayUser:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header is required")
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        raise HTTPException(status_code=401, detail="Authorization must use Bearer token")
+    token = authorization[len(prefix) :].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Bearer token is empty")
+    return _get_gateway_user(token)
 
 
 def _resolve_template_path(template_name: str) -> Path:
@@ -242,6 +300,274 @@ def stats():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stats error: {e}")
+
+
+@app.get("/gateway", response_class=HTMLResponse)
+def gateway_landing_page():
+    page = Path("templates/gateway/index.html")
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Gateway page not found")
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/gateway/tariffs", response_model=GatewayTariffsResponse)
+def gateway_tariffs():
+    tariffs = get_tariff_plans()
+    return GatewayTariffsResponse(
+        tariffs=[
+            GatewayTariffItem(
+                code=item.code,
+                name=item.name,
+                monthly_price_rub=item.price_rub,
+                included_tokens=item.tokens,
+                overage_price_per_1k_tokens_rub=round(item.price_rub / max(1, item.tokens / 1000), 2),
+                features=[
+                    "API key access",
+                    "Local model routing",
+                    "Provider proxy support",
+                    item.description,
+                ],
+            )
+            for item in tariffs
+        ]
+    )
+
+
+@app.post("/gateway/register", response_model=GatewayUserResponse)
+def gateway_register(payload: GatewayUserRegisterRequest):
+    email = normalize_email(payload.email)
+    plans = {plan.code: plan for plan in get_tariff_plans()}
+    plan = plans.get(payload.tariff_code)
+    if not plan:
+        raise HTTPException(status_code=400, detail=f"Unsupported tariff_code: {payload.tariff_code}")
+
+    _, password_hash = hash_password(payload.password)
+    api_key, _, _, _ = generate_api_key()
+    with SessionLocal() as db:
+        exists = db.query(GatewayUser).filter(GatewayUser.email == email).first()
+        if exists:
+            raise HTTPException(status_code=409, detail="Email already registered")
+        user = GatewayUser(
+            email=email,
+            password_hash=password_hash,
+            api_key=api_key,
+            tokens_balance=0,
+            plan=plan.code,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return GatewayUserResponse(
+            user_id=user.id,
+            email=user.email,
+            api_key=user.api_key,
+            token_balance=user.tokens_balance,
+            tariff_code=user.plan,
+        )
+
+
+@app.get("/gateway/models", response_model=GatewayCatalogResponse)
+def gateway_models(_: GatewayUser = Depends(_get_gateway_user)):
+    with SessionLocal() as db:
+        rows = db.query(GatewayModel).filter(GatewayModel.is_active.is_(True)).order_by(GatewayModel.id.asc()).all()
+    if not rows:
+        catalog = get_gateway_models()
+        return GatewayCatalogResponse(
+            models=[
+                GatewayModelItem(
+                    model_id=m.model_id,
+                    display_name=m.label,
+                    provider=m.provider,
+                    target_model=m.upstream_model,
+                    price_per_1k_tokens=float(m.cost_per_1k_tokens),
+                    is_active=True,
+                )
+                for m in catalog
+            ]
+        )
+    return GatewayCatalogResponse(
+        models=[
+            GatewayModelItem(
+                model_id=row.model_key,
+                display_name=row.display_name,
+                provider=row.provider,
+                target_model=row.target_model,
+                price_per_1k_tokens=row.price_per_1k_tokens,
+                is_active=row.is_active,
+            )
+            for row in rows
+        ]
+    )
+
+
+@app.get("/gateway/balance", response_model=GatewayBalanceResponse)
+def gateway_balance(user: GatewayUser = Depends(_get_gateway_user)):
+    return GatewayBalanceResponse(
+        user_id=user.id,
+        token_balance=user.tokens_balance,
+        tariff_code=user.plan,
+    )
+
+
+@app.post("/gateway/tokens/topup", response_model=GatewayTopUpResponse)
+def gateway_tokens_topup(payload: GatewayTopUpRequest, user: GatewayUser = Depends(_get_gateway_user)):
+    with SessionLocal() as db:
+        row = db.query(GatewayUser).filter(GatewayUser.id == user.id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Gateway user not found")
+        row.tokens_balance += payload.tokens
+        db.commit()
+        db.refresh(row)
+        return GatewayTopUpResponse(user_id=row.id, token_balance=row.tokens_balance)
+
+
+@app.post("/gateway/generate", response_model=GatewayGenerateResponse)
+def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depends(_get_gateway_user)):
+    model_def = resolve_gateway_model(payload.model_id)
+    if not model_def:
+        raise HTTPException(status_code=404, detail=f"Unknown model_id: {payload.model_id}")
+
+    prompt = payload.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    messages = [{"role": "user", "content": prompt}]
+
+    with SessionLocal() as db:
+        user_row = db.query(GatewayUser).filter(GatewayUser.id == user.id, GatewayUser.is_active.is_(True)).first()
+        if not user_row:
+            raise HTTPException(status_code=401, detail="Gateway user inactive")
+
+        try:
+            if model_def.provider == "ollama":
+                content = run_chat_mode(client=client, model=model_def.upstream_model, prompt=prompt)
+                prompt_tokens = estimate_messages_tokens(messages)
+                completion_tokens = estimate_text_tokens(content)
+                total_tokens = prompt_tokens + completion_tokens
+            elif model_def.provider == "openai":
+                content, prompt_tokens, completion_tokens, total_tokens = call_openai_proxy(
+                    model=model_def.upstream_model,
+                    messages=messages,
+                    temperature=payload.temperature,
+                    max_tokens=payload.max_tokens,
+                )
+            else:
+                raise RuntimeError(f"Unsupported provider: {model_def.provider}")
+
+            cost_tokens = compute_token_charge(total_tokens, model_def.cost_per_1k_tokens)
+            if user_row.tokens_balance < cost_tokens:
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        f"Insufficient token balance. Need {cost_tokens}, "
+                        f"available {user_row.tokens_balance}"
+                    ),
+                )
+
+            user_row.tokens_balance -= cost_tokens
+            db.add(
+                GatewayUsageLog(
+                    user_id=user_row.id,
+                    model_key=model_def.model_id,
+                    provider=model_def.provider,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    cost_tokens=cost_tokens,
+                    success=True,
+                )
+            )
+            db.commit()
+            db.refresh(user_row)
+
+            return GatewayGenerateResponse(
+                provider=model_def.provider,
+                model_id=model_def.model_id,
+                answer=content,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                tokens_spent=cost_tokens,
+                token_balance=user_row.tokens_balance,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            db.add(
+                GatewayUsageLog(
+                    user_id=user_row.id,
+                    model_key=model_def.model_id,
+                    provider=model_def.provider,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    cost_tokens=0,
+                    success=False,
+                    error_message=str(exc),
+                )
+            )
+            db.commit()
+            raise HTTPException(status_code=502, detail=f"Gateway provider error: {exc}")
+
+
+@app.get("/v1/models")
+def openai_compatible_models(user: GatewayUser = Depends(_get_gateway_user_from_bearer)):
+    _ = user
+    with SessionLocal() as db:
+        rows = db.query(GatewayModel).filter(GatewayModel.is_active.is_(True)).order_by(GatewayModel.id.asc()).all()
+    if rows:
+        model_ids = [row.model_key for row in rows]
+    else:
+        model_ids = [item.model_id for item in get_gateway_models()]
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": model_id,
+                "object": "model",
+                "owned_by": "ai-servise-gateway",
+            }
+            for model_id in model_ids
+        ],
+    }
+
+
+@app.post("/v1/chat/completions")
+def openai_compatible_chat_completions(
+    payload: GatewayChatRequest,
+    user: GatewayUser = Depends(_get_gateway_user_from_bearer),
+):
+    prompt = "\n".join(message.content for message in payload.messages if message.role == "user").strip()
+    if not prompt:
+        prompt = payload.messages[-1].content.strip()
+    generate_payload = GatewayGenerateRequest(
+        model_id=payload.model,
+        prompt=prompt,
+        max_tokens=payload.max_tokens,
+        temperature=payload.temperature,
+    )
+    generated = gateway_generate(generate_payload, user)
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        "object": "chat.completion",
+        "created": int(datetime.now(timezone.utc).timestamp()),
+        "model": generated.model_id,
+        "choices": [
+            {
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": generated.answer,
+                },
+            }
+        ],
+        "usage": {
+            "prompt_tokens": generated.prompt_tokens,
+            "completion_tokens": generated.completion_tokens,
+            "total_tokens": generated.total_tokens,
+        },
+    }
 
 
 @app.post("/generate/domains", response_model=DomainSuggestionsResponse)

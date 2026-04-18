@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Gateway</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    h1, h2 {
+      margin-top: 0;
+    }
+    .muted {
+      color: #94a3b8;
+    }
+    input, textarea, select, button {
+      width: 100%;
+      box-sizing: border-box;
+      border-radius: 8px;
+      border: 1px solid #475569;
+      background: #0b1220;
+      color: #e2e8f0;
+      padding: 10px 12px;
+      margin-top: 6px;
+      margin-bottom: 12px;
+    }
+    button {
+      background: #2563eb;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover {
+      background: #1d4ed8;
+    }
+    .grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    .plan {
+      padding: 12px;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #0b1220;
+      margin-bottom: 10px;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 10px;
+      overflow-x: auto;
+      min-height: 64px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AI Gateway</h1>
+    <p class="muted">
+      Единая точка доступа к локальным и внешним AI-моделям с токен-биллингом.
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Тарифы</h2>
+        <div id="plans"></div>
+      </section>
+
+      <section class="card">
+        <h2>Регистрация</h2>
+        <label>Email</label>
+        <input id="email" placeholder="user@example.com" />
+        <button id="registerBtn">Создать аккаунт</button>
+        <pre id="registerOut"></pre>
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Пополнение токенов</h2>
+        <label>API Key</label>
+        <input id="topupKey" placeholder="agw_xxx" />
+        <label>Тариф</label>
+        <select id="planCode">
+          <option value="start">start</option>
+          <option value="pro">pro</option>
+          <option value="business">business</option>
+        </select>
+        <button id="topupBtn">Пополнить</button>
+        <pre id="topupOut"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Баланс</h2>
+        <label>API Key</label>
+        <input id="balanceKey" placeholder="agw_xxx" />
+        <button id="balanceBtn">Показать баланс</button>
+        <pre id="balanceOut"></pre>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Вызов модели</h2>
+      <label>API Key</label>
+      <input id="genKey" placeholder="agw_xxx" />
+      <label>Provider</label>
+      <select id="provider">
+        <option value="local">local</option>
+        <option value="external">external</option>
+      </select>
+      <label>Model</label>
+      <input id="modelName" placeholder="qwen2.5:3b / gpt-proxy" value="qwen2.5:3b" />
+      <label>Prompt</label>
+      <textarea id="prompt" rows="4" placeholder="Введите запрос"></textarea>
+      <button id="genBtn">Отправить</button>
+      <pre id="genOut"></pre>
+    </section>
+  </div>
+
+  <script>
+    async function safeJson(res) {
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { raw: text };
+      }
+    }
+
+    async function loadPlans() {
+      const res = await fetch("/gateway/plans");
+      const data = await safeJson(res);
+      const el = document.getElementById("plans");
+      el.innerHTML = "";
+      (data.plans || []).forEach((plan) => {
+        const div = document.createElement("div");
+        div.className = "plan";
+        div.textContent = `${plan.code}: ${plan.tokens} токенов за ${plan.price_rub} RUB`;
+        el.appendChild(div);
+      });
+    }
+
+    document.getElementById("registerBtn").onclick = async () => {
+      const email = document.getElementById("email").value.trim();
+      const res = await fetch("/gateway/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
+      document.getElementById("registerOut").textContent = JSON.stringify(await safeJson(res), null, 2);
+    };
+
+    document.getElementById("topupBtn").onclick = async () => {
+      const apiKey = document.getElementById("topupKey").value.trim();
+      const planCode = document.getElementById("planCode").value;
+      const res = await fetch("/gateway/billing/topup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey, plan_code: planCode })
+      });
+      document.getElementById("topupOut").textContent = JSON.stringify(await safeJson(res), null, 2);
+    };
+
+    document.getElementById("balanceBtn").onclick = async () => {
+      const apiKey = document.getElementById("balanceKey").value.trim();
+      const res = await fetch(`/gateway/me?api_key=${encodeURIComponent(apiKey)}`);
+      document.getElementById("balanceOut").textContent = JSON.stringify(await safeJson(res), null, 2);
+    };
+
+    document.getElementById("genBtn").onclick = async () => {
+      const apiKey = document.getElementById("genKey").value.trim();
+      const provider = document.getElementById("provider").value;
+      const model = document.getElementById("modelName").value.trim();
+      const prompt = document.getElementById("prompt").value;
+      const res = await fetch("/gateway/v1/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey, provider, model, prompt })
+      });
+      document.getElementById("genOut").textContent = JSON.stringify(await safeJson(res), null, 2);
+    };
+
+    loadPlans();
+  </script>
+</body>
+</html>
