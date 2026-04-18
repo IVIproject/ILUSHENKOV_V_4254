@@ -257,8 +257,8 @@ def test_admin_api_key_protects_import_endpoints():
             json={
                 "items": [
                     {
-                        "question": "Q2",
-                        "answer": "A2",
+                        "question": "Question 2",
+                        "answer": "Answer 2",
                         "source": "support_chat",
                     }
                 ]
