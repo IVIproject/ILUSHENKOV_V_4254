@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gateway — История запросов</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #0b1220; color: #e2e8f0; }
+    .container { max-width: 980px; margin: 0 auto; padding: 20px 14px 40px; }
+    .card { background: #111827; border: 1px solid #334155; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+    .top-nav { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .top-nav a { color: #93c5fd; text-decoration: none; }
+    input, button { width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; padding: 10px 12px; margin-top: 6px; margin-bottom: 10px; }
+    button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
+    pre { margin: 0; background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 10px; white-space: pre-wrap; min-height: 40px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>История запросов</h1>
+    <div class="top-nav">
+      <a href="/gateway/profile">Профиль</a>
+      <a href="/gateway/models">Модели</a>
+      <a href="/gateway/finance">Финансы</a>
+    </div>
+    <section class="card">
+      <label>Лимит</label>
+      <input id="usageLimit" type="number" min="1" max="200" value="30" />
+      <button id="loadBtn">Загрузить</button>
+      <pre id="out"></pre>
+    </section>
+  </div>
+  <script>
+    const API_KEY_STORAGE = "gateway_api_key";
+    function getApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ""; }
+    function setText(id, value) { document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); }
+    async function parseResponse(response) {
+      const raw = await response.text();
+      let data;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+      if (!response.ok) {
+        const detail = data && data.detail ? data.detail : raw || "Request failed";
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+      return data;
+    }
+    async function apiFetch(url) {
+      const apiKey = getApiKey();
+      if (!apiKey) throw new Error("API key not found. Login first.");
+      const response = await fetch(url, { headers: { "X-Gateway-Key": apiKey } });
+      return parseResponse(response);
+    }
+    async function loadUsage() {
+      try {
+        const limit = Number(document.getElementById("usageLimit").value || "30");
+        const data = await apiFetch(`/gateway/usage?limit=${encodeURIComponent(limit)}`);
+        setText("out", data.items);
+      } catch (error) {
+        setText("out", String(error));
+      }
+    }
+    document.getElementById("loadBtn").addEventListener("click", loadUsage);
+    if (!getApiKey()) { window.location.href = "/gateway/login"; } else { loadUsage(); }
+  </script>
+</body>
+</html>

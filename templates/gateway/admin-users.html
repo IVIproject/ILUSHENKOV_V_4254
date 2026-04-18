@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gateway Admin Users</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
+    .container { max-width: 1240px; margin: 0 auto; padding: 24px 16px 56px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    label { display: block; margin-top: 8px; color: #cbd5e1; }
+    input, button, select { width: 100%; margin-top: 6px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px 12px; }
+    button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
+    button.inline { width: auto; padding: 6px 10px; margin: 0; font-size: 12px; }
+    button.secondary { background: #374151; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #334155; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #0b1220; color: #cbd5e1; }
+    pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 46px; }
+    .inline-group { display: flex; gap: 8px; align-items: center; }
+    .small { color: #94a3b8; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Админ: пользователи</h1>
+    <p class="small">Управление пользователями: роль, баланс, активность, удаление.</p>
+    <div class="inline-group">
+      <button class="secondary" onclick="location.href='/gateway/admin'">Назад</button>
+      <button class="secondary" onclick="location.href='/gateway'">Выйти</button>
+    </div>
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label>Поиск email</label>
+          <input id="searchInput" placeholder="user@example.com" />
+        </div>
+        <div>
+          <label>Лимит</label>
+          <input id="limitInput" type="number" min="1" max="200" value="50" />
+        </div>
+      </div>
+      <label><input id="includeInactiveInput" type="checkbox" style="width:auto; margin-right:8px;" />Показывать неактивных</label>
+      <button id="loadBtn">Загрузить пользователей</button>
+      <div id="tableWrap"></div>
+    </section>
+    <section class="card">
+      <h2>Результат действий</h2>
+      <pre id="out"></pre>
+    </section>
+  </div>
+
+  <script>
+    const API_KEY_STORAGE = "gateway_api_key";
+
+    function getApiKey() {
+      return localStorage.getItem(API_KEY_STORAGE) || "";
+    }
+    function setText(id, value) {
+      document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+    async function parseResponse(response) {
+      const raw = await response.text();
+      let data;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+      if (!response.ok) {
+        const detail = data && data.detail ? data.detail : raw || "Request failed";
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+      return data;
+    }
+    async function apiFetch(url, options = {}) {
+      const key = getApiKey();
+      if (!key) throw new Error("Сначала выполните вход.");
+      const headers = Object.assign({}, options.headers || {}, { "X-Gateway-Key": key });
+      const response = await fetch(url, Object.assign({}, options, { headers }));
+      return parseResponse(response);
+    }
+
+    function buildActions(user) {
+      const wrap = document.createElement("div");
+      wrap.style.display = "grid";
+      wrap.style.gap = "6px";
+
+      const role = document.createElement("select");
+      ["user", "admin"].forEach((r) => {
+        const option = document.createElement("option");
+        option.value = r;
+        option.textContent = r;
+        if (r === user.role) option.selected = true;
+        role.appendChild(option);
+      });
+
+      const addTokens = document.createElement("input");
+      addTokens.type = "number";
+      addTokens.placeholder = "add_tokens";
+      addTokens.value = "0";
+      addTokens.style.margin = "0";
+
+      const reason = document.createElement("input");
+      reason.type = "text";
+      reason.placeholder = "reason";
+      reason.style.margin = "0";
+
+      const active = document.createElement("label");
+      active.className = "small";
+      active.innerHTML = `<input type="checkbox" ${user.is_active ? "checked" : ""} style="width:auto; margin-right:8px;" />active`;
+      const activeInput = active.querySelector("input");
+
+      const updateBtn = document.createElement("button");
+      updateBtn.className = "inline";
+      updateBtn.textContent = "Update";
+      updateBtn.onclick = async () => {
+        try {
+          const payload = {
+            role: role.value,
+            is_active: activeInput.checked,
+            add_tokens: Number(addTokens.value || "0"),
+            balance_reason: reason.value.trim() || undefined,
+          };
+          if (payload.add_tokens === 0) delete payload.add_tokens;
+          const result = await apiFetch(`/gateway/admin/users/${user.user_id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          setText("out", result);
+          await loadUsers();
+        } catch (error) {
+          setText("out", String(error));
+        }
+      };
+
+      const usageBtn = document.createElement("button");
+      usageBtn.className = "inline secondary";
+      usageBtn.textContent = "Usage";
+      usageBtn.onclick = async () => {
+        try {
+          const result = await apiFetch(`/gateway/admin/users/${user.user_id}/usage?limit=100`);
+          setText("out", result.items);
+        } catch (error) {
+          setText("out", String(error));
+        }
+      };
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "inline secondary";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.onclick = async () => {
+        if (!confirm(`Удалить пользователя ${user.email}?`)) return;
+        try {
+          const result = await apiFetch(`/gateway/admin/users/${user.user_id}`, { method: "DELETE" });
+          setText("out", result);
+          await loadUsers();
+        } catch (error) {
+          setText("out", String(error));
+        }
+      };
+
+      wrap.appendChild(role);
+      wrap.appendChild(addTokens);
+      wrap.appendChild(reason);
+      wrap.appendChild(active);
+      wrap.appendChild(updateBtn);
+      wrap.appendChild(usageBtn);
+      wrap.appendChild(deleteBtn);
+      return wrap;
+    }
+
+    async function loadUsers() {
+      try {
+        const limit = Number(document.getElementById("limitInput").value || "50");
+        const search = document.getElementById("searchInput").value.trim();
+        const includeInactive = document.getElementById("includeInactiveInput").checked;
+        const params = new URLSearchParams({
+          limit: String(limit),
+          offset: "0",
+          include_inactive: String(includeInactive),
+        });
+        if (search) params.set("search", search);
+        const data = await apiFetch(`/gateway/admin/users?${params.toString()}`);
+        const wrap = document.getElementById("tableWrap");
+        wrap.innerHTML = "";
+        const table = document.createElement("table");
+        table.innerHTML = "<thead><tr><th>ID / email</th><th>role / balance</th><th>actions</th></tr></thead><tbody></tbody>";
+        const tbody = table.querySelector("tbody");
+        data.users.forEach((u) => {
+          const row = document.createElement("tr");
+          const c1 = document.createElement("td");
+          c1.innerHTML = `<div><strong>#${u.user_id}</strong></div><div>${u.email}</div>`;
+          const c2 = document.createElement("td");
+          c2.innerHTML = `<div>${u.role}</div><div>${u.token_balance.toLocaleString("ru-RU")} токенов</div>`;
+          const c3 = document.createElement("td");
+          c3.appendChild(buildActions(u));
+          row.appendChild(c1);
+          row.appendChild(c2);
+          row.appendChild(c3);
+          tbody.appendChild(row);
+        });
+        wrap.appendChild(table);
+      } catch (error) {
+        setText("tableWrap", String(error));
+      }
+    }
+
+    document.getElementById("loadBtn").addEventListener("click", loadUsers);
+    loadUsers();
+  </script>
+</body>
+</html>

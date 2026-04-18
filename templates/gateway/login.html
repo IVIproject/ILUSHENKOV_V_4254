@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Gateway - Авторизация</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
+    .container { max-width: 700px; margin: 0 auto; padding: 24px 16px 40px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }
+    label { display: block; margin-top: 8px; color: #cbd5e1; }
+    input, button { width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px 12px; margin-top: 6px; margin-bottom: 10px; }
+    button { border: 0; background: #2563eb; font-weight: 700; cursor: pointer; }
+    pre { margin: 0; white-space: pre-wrap; background: #020617; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-height: 48px; }
+    .small { font-size: 13px; color: #94a3b8; }
+    a { color: #60a5fa; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Авторизация</h1>
+    <p class="small"><a href="/gateway/register">Регистрация</a> | <a href="/gateway">Главная</a></p>
+    <section class="card">
+      <label>Email</label>
+      <input id="email" placeholder="user@example.com" />
+      <label>Пароль</label>
+      <input id="password" type="password" />
+      <button id="loginBtn">Войти</button>
+      <pre id="out"></pre>
+    </section>
+  </div>
+  <script>
+    const API_KEY_STORAGE = "gateway_api_key";
+    const USER_ROLE_STORAGE = "gateway_user_role";
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    async function parseResponse(response) {
+      const raw = await response.text();
+      let data;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+      if (!response.ok) {
+        const detail = data && data.detail ? data.detail : raw || "Request failed";
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+      return data;
+    }
+
+    async function login() {
+      try {
+        const payload = {
+          email: document.getElementById("email").value.trim(),
+          password: document.getElementById("password").value,
+        };
+        const response = await fetch("/gateway/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await parseResponse(response);
+        localStorage.setItem(API_KEY_STORAGE, data.api_key);
+        localStorage.setItem(USER_ROLE_STORAGE, data.role || "user");
+        setText("out", { login: "ok", role: data.role });
+        if (data.role === "admin") {
+          window.location.href = "/gateway/admin";
+        } else {
+          window.location.href = "/gateway/profile";
+        }
+      } catch (error) {
+        setText("out", String(error));
+      }
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", login);
+  </script>
+</body>
+</html>
