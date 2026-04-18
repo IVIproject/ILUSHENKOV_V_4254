@@ -3,19 +3,90 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gateway — Модели</title>
+  <title>AI Gateway — Доступные модели</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #0b1220; color: #e2e8f0; }
-    .container { max-width: 1100px; margin: 0 auto; padding: 22px 14px 40px; }
-    .card { background: #111827; border: 1px solid #334155; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
-    button { border: 0; border-radius: 8px; padding: 10px 12px; background: #2563eb; color: #fff; font-weight: 700; cursor: pointer; }
-    button.secondary { background: #374151; }
-    .header { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
-    .grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-    .muted { color:#94a3b8; font-size:13px; }
-    .model-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
-    .chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
-    .chip { font-size:12px; background:#0f172a; border:1px solid #334155; border-radius:999px; padding:4px 10px; color:#cbd5e1; }
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #030712;
+      color: #e5e7eb;
+    }
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 16px 56px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .nav a, .nav button {
+      text-decoration: none;
+      border: 1px solid #334155;
+      background: #0b1220;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    .model-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .chip {
+      font-size: 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 999px;
+      padding: 4px 10px;
+      color: #cbd5e1;
+    }
+    .muted {
+      color: #94a3b8;
+      font-size: 13px;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -23,16 +94,17 @@
     <div class="header">
       <div>
         <h1>Доступные модели</h1>
-        <div class="muted">Выберите модель — откроется отдельная страница с описанием и запросом.</div>
+        <div class="muted">Выберите модель — откроется отдельная страница с описанием и отправкой запроса.</div>
       </div>
-      <div style="display:flex; gap:8px;">
-        <button class="secondary" id="toProfileBtn">Профиль</button>
-        <button class="secondary" id="logoutBtn">Выйти</button>
-      </div>
+      <button id="reloadBtn">Обновить список</button>
     </div>
 
-    <div style="margin-bottom:12px;">
-      <button id="reloadBtn">Обновить список</button>
+    <div class="nav">
+      <a href="/gateway/profile">Профиль</a>
+      <a href="/gateway/models/page">Модели</a>
+      <a href="/gateway/history">История запросов</a>
+      <a href="/gateway/finance">Финансовые операции</a>
+      <button id="logoutBtn">Выйти</button>
     </div>
 
     <div id="modelsWrap" class="grid"></div>
@@ -50,7 +122,7 @@
       let data;
       try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
       if (!response.ok) {
-        const detail = data && data.detail ? data.detail : raw || "Request failed";
+        const detail = data && data.detail ? data.detail : raw || "Ошибка запроса";
         throw new Error(`HTTP ${response.status}: ${detail}`);
       }
       return data;
@@ -58,20 +130,16 @@
 
     async function apiFetch(url, options = {}) {
       const apiKey = getApiKey();
-      if (!apiKey) throw new Error("API key not found. Please login.");
+      if (!apiKey) throw new Error("Ключ API не найден. Выполните вход заново.");
       const headers = Object.assign({}, options.headers || {}, { "X-Gateway-Key": apiKey });
       const response = await fetch(url, Object.assign({}, options, { headers }));
       return parseResponse(response);
     }
 
     function describeModel(item) {
-      if (item.provider === "ollama") {
-        return "Локальная модель через Ollama. Быстрый ответ и минимальная цена.";
-      }
-      if (item.provider === "openai") {
-        return "Внешняя модель. Более качественные ответы, цена выше.";
-      }
-      return "Модель в каталоге gateway.";
+      if (item.provider === "ollama") return "Локальная модель через Ollama.";
+      if (item.provider === "openai") return "Внешняя модель через прокси.";
+      return "Модель из каталога AI Gateway.";
     }
 
     function modelCard(item) {
@@ -81,8 +149,8 @@
         <div class="model-title">${item.display_name}</div>
         <div class="chips">
           <span class="chip">${item.model_id}</span>
-          <span class="chip">${item.provider}</span>
-          <span class="chip">~${item.price_per_1k_tokens} токенов / 1k</span>
+          <span class="chip">Провайдер: ${item.provider}</span>
+          <span class="chip">Цена: ${item.price_per_1k_tokens} токенов / 1k</span>
         </div>
         <div class="muted" style="margin-bottom:10px;">${describeModel(item)}</div>
         <button data-model="${item.model_id}">Открыть страницу модели</button>
@@ -113,24 +181,14 @@
       window.location.href = "/gateway/login";
     }
 
-    function bind() {
-      document.getElementById("reloadBtn").addEventListener("click", loadModels);
-      document.getElementById("toProfileBtn").addEventListener("click", () => {
-        window.location.href = "/gateway/profile";
-      });
-      document.getElementById("logoutBtn").addEventListener("click", logout);
-    }
+    document.getElementById("reloadBtn").addEventListener("click", loadModels);
+    document.getElementById("logoutBtn").addEventListener("click", logout);
 
-    async function boot() {
-      if (!getApiKey()) {
-        window.location.href = "/gateway/login";
-        return;
-      }
-      bind();
-      await loadModels();
+    if (!getApiKey()) {
+      window.location.href = "/gateway/login";
+    } else {
+      loadModels();
     }
-
-    boot();
   </script>
 </body>
 </html>

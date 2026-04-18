@@ -3,15 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gateway Admin</title>
+  <title>AI Gateway — Администратор</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #030712; color: #e5e7eb; }
-    .container { max-width: 980px; margin: 0 auto; padding: 24px 16px 56px; }
-    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }
-    a, button {
-      display: block;
-      margin-top: 10px;
-      padding: 10px 12px;
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #030712;
+      color: #e5e7eb;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 16px 56px;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .muted {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-top: 0;
+    }
+    .actions {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    a.button, button {
+      display: inline-block;
+      width: 100%;
+      margin: 0;
       border-radius: 8px;
       border: 0;
       background: #2563eb;
@@ -19,23 +45,24 @@
       text-decoration: none;
       text-align: center;
       font-weight: 700;
+      padding: 10px 12px;
       cursor: pointer;
     }
-    .secondary { background: #374151; }
-    .muted { color: #94a3b8; }
+    a.button.secondary, button.secondary { background: #374151; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Админ-раздел</h1>
-    <p class="muted">Выберите раздел. Каждый блок вынесен на отдельную страницу.</p>
-    <div class="card">
-      <a href="/gateway/admin/users/ui">Пользователи</a>
-      <a href="/gateway/admin/models/ui">Настройка цен и модели</a>
-      <a href="/gateway/admin/finance/ui">Финансовые операции</a>
-      <a href="/gateway/profile" class="secondary">Перейти в профиль пользователя</a>
-      <button id="logoutBtn" class="secondary">Выйти (очистить ключ)</button>
-    </div>
+    <h1>Панель администратора</h1>
+    <p class="muted">Выберите раздел управления. Все страницы выполнены в едином стиле.</p>
+    <section class="card">
+      <div class="actions">
+        <a class="button" href="/gateway/admin/users/ui">Пользователи</a>
+        <a class="button" href="/gateway/admin/finance/ui">Финансовые операции</a>
+        <a class="button secondary" href="/gateway/profile">Профиль пользователя</a>
+        <button id="logoutBtn" class="secondary">Выйти</button>
+      </div>
+    </section>
   </div>
   <script>
     document.getElementById("logoutBtn").addEventListener("click", () => {
