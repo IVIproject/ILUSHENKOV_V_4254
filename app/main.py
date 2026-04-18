@@ -1,28 +1,48 @@
 import uuid
-from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from ollama import Client
 from sqlalchemy import func, select
- 
+
 from .db import Base, SessionLocal, engine
 from .logging_config import get_logger, setup_logging
-from .models import RequestLog
-from .settings import settings
+from .models import RequestLog, SupportFaqEntry
 from .schemas import (
     DomainSuggestionsRequest,
     DomainSuggestionsResponse,
     GenerateRequest,
     GenerateResponse,
     HistoryItem,
+    ModeRunRequest,
+    ModeRunResponse,
     StatsResponse,
     StreamChunk,
+    SupportFaqAskRequest,
+    SupportFaqAskResponse,
+    SupportFaqImportRequest,
+    SupportFaqImportResponse,
 )
- 
+from .services import (
+    extract_domain_suggestions,
+    render_php_template,
+    run_chat_mode,
+    run_domain_mode,
+    run_support_faq_mode,
+)
+from .settings import settings
+
 setup_logging()
 logger = get_logger("app.main")
 client = Client(host=settings.ollama_host)
+
+
+def _save_log(prompt: str, answer: str) -> None:
+    with SessionLocal() as db:
+        db.add(RequestLog(prompt=prompt, answer=answer))
+        db.commit()
 
 
 @asynccontextmanager
@@ -43,8 +63,8 @@ async def add_request_context(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     return response
- 
- 
+
+
 @app.get("/health")
 def health():
     try:
@@ -60,8 +80,8 @@ def health():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Health check error: {e}")
- 
- 
+
+
 @app.post("/generate", response_model=GenerateResponse)
 def generate(payload: GenerateRequest, request: Request):
     try:
@@ -69,17 +89,12 @@ def generate(payload: GenerateRequest, request: Request):
             "generate request received",
             extra={"request_id": request.state.request_id},
         )
-        resp = client.chat(
+        answer = run_chat_mode(
+            client=client,
             model=settings.ollama_model,
-            messages=[{"role": "user", "content": payload.prompt}],
+            prompt=payload.prompt,
         )
-        answer = resp["message"]["content"]
- 
-        with SessionLocal() as db:
-            row = RequestLog(prompt=payload.prompt, answer=answer)
-            db.add(row)
-            db.commit()
- 
+        _save_log(prompt=payload.prompt, answer=answer)
         return GenerateResponse(answer=answer)
     except Exception as e:
         logger.exception(
@@ -87,8 +102,8 @@ def generate(payload: GenerateRequest, request: Request):
             extra={"request_id": request.state.request_id},
         )
         raise HTTPException(status_code=500, detail=f"Generation error: {e}")
- 
- 
+
+
 @app.get("/history", response_model=list[HistoryItem])
 def history(limit: int = Query(10, ge=1, le=100)):
     try:
@@ -99,15 +114,14 @@ def history(limit: int = Query(10, ge=1, le=100)):
                 .limit(limit)
                 .all()
             )
- 
         return [
             HistoryItem(
-                id=r.id,
-                prompt=r.prompt,
-                answer=r.answer,
-                created_at=r.created_at,
+                id=row.id,
+                prompt=row.prompt,
+                answer=row.answer,
+                created_at=row.created_at,
             )
-            for r in rows
+            for row in rows
         ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"History error: {e}")
@@ -145,62 +159,29 @@ def stats():
 
 @app.post("/generate/domains", response_model=DomainSuggestionsResponse)
 def generate_domains(payload: DomainSuggestionsRequest, request: Request):
-    prompt = (
-        "You are a naming assistant for internet domains.\n"
-        f"Generate {payload.count} domain name ideas for business context: "
-        f"{payload.business_context}\n"
-        f"Keywords: {', '.join(payload.keywords) if payload.keywords else 'none'}\n"
-        f"Zone: {payload.zone}\n"
-        "Правила:\n"
-        "- Только латиница и цифры\n"
-        "- Без пробелов\n"
-        "- Краткие и запоминающиеся\n"
-        "Верни только список по одному домену в строке.\n"
-        "Пример:\n"
-        "myservice.ru\n"
-        "myservice24.ru\n"
-    )
     try:
         logger.info(
             "domain generation request received",
             extra={"request_id": request.state.request_id},
         )
-        resp = client.chat(
+        raw = run_domain_mode(
+            client=client,
             model=settings.ollama_model,
-            messages=[{"role": "user", "content": prompt}],
+            business_context=payload.business_context,
+            keywords=payload.keywords,
+            zone=payload.zone,
+            count=payload.count,
         )
-        raw_text = resp["message"]["content"]
-        candidates = []
-        for line in raw_text.splitlines():
-            cleaned = line.strip().strip("-").strip()
-            if not cleaned:
-                continue
-            if "." not in cleaned:
-                continue
-            if " " in cleaned:
-                continue
-            normalized = cleaned.lower()
-            if not normalized.endswith(payload.zone):
-                continue
-            candidates.append(normalized)
-
-        # Keep unique order and cap by requested count.
-        unique = list(dict.fromkeys(candidates))[: payload.count]
-        if not unique:
-            base = "".join(ch for ch in payload.business_context.lower() if ch.isalnum())
-            if not base:
-                base = "project"
-            unique = [f"{base[:12]}{i+1}.{payload.zone}" for i in range(payload.count)]
-
-        with SessionLocal() as db:
-            row = RequestLog(prompt=prompt, answer="\n".join(unique))
-            db.add(row)
-            db.commit()
-
+        suggestions = extract_domain_suggestions(raw, payload.zone, payload.count)
+        if len(suggestions) < payload.count:
+            base = "".join(ch for ch in payload.business_context.lower() if ch.isalnum()) or "project"
+            while len(suggestions) < payload.count:
+                suggestions.append(f"{base[:12]}{len(suggestions)+1}{payload.zone}")
+        _save_log(prompt=payload.business_context, answer="\n".join(suggestions))
         return DomainSuggestionsResponse(
             business_context=payload.business_context,
             zone=payload.zone,
-            suggestions=unique,
+            suggestions=suggestions,
         )
     except Exception as e:
         logger.exception(
@@ -208,6 +189,149 @@ def generate_domains(payload: DomainSuggestionsRequest, request: Request):
             extra={"request_id": request.state.request_id},
         )
         raise HTTPException(status_code=500, detail=f"Domain generation error: {e}")
+
+
+@app.post("/support/faq/import", response_model=SupportFaqImportResponse)
+def import_support_faq(payload: SupportFaqImportRequest):
+    try:
+        imported = 0
+        with SessionLocal() as db:
+            for item in payload.items:
+                exists = (
+                    db.query(SupportFaqEntry)
+                    .filter(
+                        SupportFaqEntry.question == item.question.strip(),
+                        SupportFaqEntry.answer == item.answer.strip(),
+                    )
+                    .first()
+                )
+                if exists:
+                    continue
+                db.add(
+                    SupportFaqEntry(
+                        question=item.question.strip(),
+                        answer=item.answer.strip(),
+                        source=item.source,
+                    )
+                )
+                imported += 1
+            db.commit()
+        return SupportFaqImportResponse(imported=imported)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"FAQ import error: {e}")
+
+
+@app.post("/support/faq/ask", response_model=SupportFaqAskResponse)
+def ask_support_faq(payload: SupportFaqAskRequest):
+    try:
+        with SessionLocal() as db:
+            rows = (
+                db.query(SupportFaqEntry)
+                .order_by(SupportFaqEntry.id.desc())
+                .limit(payload.max_context_items)
+                .all()
+            )
+        answer = run_support_faq_mode(
+            client=client,
+            model=settings.ollama_model,
+            user_question=payload.question,
+            faq_pairs=[(row.question, row.answer) for row in rows],
+        )
+        _save_log(prompt=payload.question, answer=answer)
+        return SupportFaqAskResponse(answer=answer, matched_items=len(rows))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Support FAQ ask error: {e}")
+
+
+@app.post("/mode/run", response_model=ModeRunResponse)
+def run_mode(payload: ModeRunRequest, request: Request):
+    try:
+        mode = payload.mode.strip()
+        data = payload.payload or {}
+
+        if mode == "chat":
+            prompt = str(data.get("prompt", "")).strip()
+            if not prompt:
+                raise HTTPException(status_code=400, detail="payload.prompt is required for chat mode")
+            answer = run_chat_mode(client=client, model=settings.ollama_model, prompt=prompt)
+            _save_log(prompt=prompt, answer=answer)
+            return ModeRunResponse(mode=mode, result={"text": answer})
+
+        if mode == "domains":
+            business_context = str(data.get("business_context", "")).strip()
+            if not business_context:
+                raise HTTPException(status_code=400, detail="payload.business_context is required for domains mode")
+            zone = str(data.get("zone", ".ru"))
+            count = int(data.get("count", 10))
+            keywords = data.get("keywords", [])
+            if not isinstance(keywords, list):
+                keywords = []
+            raw = run_domain_mode(
+                client=client,
+                model=settings.ollama_model,
+                business_context=business_context,
+                keywords=[str(k) for k in keywords],
+                zone=zone,
+                count=count,
+            )
+            suggestions = extract_domain_suggestions(raw, zone, count)
+            if len(suggestions) < count:
+                base = "".join(ch for ch in business_context.lower() if ch.isalnum()) or "project"
+                while len(suggestions) < count:
+                    suggestions.append(f"{base[:12]}{len(suggestions)+1}{zone}")
+            _save_log(prompt=business_context, answer="\n".join(suggestions))
+            return ModeRunResponse(mode=mode, result={"suggestions": suggestions, "zone": zone})
+
+        if mode == "php_page":
+            template_html = str(data.get("template_html", ""))
+            content_prompt = str(data.get("content_prompt", "")).strip()
+            if not template_html or not content_prompt:
+                raise HTTPException(
+                    status_code=400,
+                    detail="payload.template_html and payload.content_prompt are required for php_page mode",
+                )
+            rendered = render_php_template(
+                client=client,
+                model=settings.ollama_model,
+                template_html=template_html,
+                prompt=content_prompt,
+            )
+            _save_log(prompt=content_prompt, answer=rendered)
+            return ModeRunResponse(mode=mode, result={"php_page": rendered})
+
+        if mode == "support_faq":
+            question = str(data.get("question", "")).strip()
+            max_context_items = int(data.get("max_context_items", 5))
+            if not question:
+                raise HTTPException(status_code=400, detail="payload.question is required for support_faq mode")
+            with SessionLocal() as db:
+                rows = (
+                    db.query(SupportFaqEntry)
+                    .order_by(SupportFaqEntry.id.desc())
+                    .limit(max(1, min(max_context_items, 20)))
+                    .all()
+                )
+            answer = run_support_faq_mode(
+                client=client,
+                model=settings.ollama_model,
+                user_question=question,
+                faq_pairs=[(row.question, row.answer) for row in rows],
+            )
+            _save_log(prompt=question, answer=answer)
+            return ModeRunResponse(
+                mode=mode,
+                result={"answer": answer, "matched_items": len(rows)},
+            )
+
+        raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "mode run failed",
+            extra={"request_id": request.state.request_id},
+        )
+        raise HTTPException(status_code=500, detail=f"Mode run error: {e}")
 
 
 @app.post("/generate/stream")
@@ -225,26 +349,16 @@ def generate_stream(payload: GenerateRequest, request: Request):
                 if not text:
                     continue
                 chunks.append(text)
-                chunk = StreamChunk(chunk=text)
-                yield chunk.model_dump_json() + "\n"
+                yield StreamChunk(chunk=text).model_dump_json() + "\n"
 
             full_answer = "".join(chunks)
-            with SessionLocal() as db:
-                row = RequestLog(prompt=payload.prompt, answer=full_answer)
-                db.add(row)
-                db.commit()
-            done_chunk = StreamChunk(chunk="", done=True)
-            yield done_chunk.model_dump_json() + "\n"
+            _save_log(prompt=payload.prompt, answer=full_answer)
+            yield StreamChunk(chunk="", done=True).model_dump_json() + "\n"
         except Exception:
             logger.exception(
                 "stream generation failed",
                 extra={"request_id": request.state.request_id},
             )
-            error_chunk = StreamChunk(
-                chunk="",
-                done=True,
-                error="Generation error in stream",
-            )
-            yield error_chunk.model_dump_json() + "\n"
+            yield StreamChunk(chunk="", done=True, error="Generation error in stream").model_dump_json() + "\n"
 
     return StreamingResponse(iterator(), media_type="application/x-ndjson")

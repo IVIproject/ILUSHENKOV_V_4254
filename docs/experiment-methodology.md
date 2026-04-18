@@ -37,7 +37,8 @@ make benchmark
 
 ```bash
 python3 scripts/benchmark_api.py \
-  --url http://127.0.0.1:8080/generate/domains \
+  --url http://127.0.0.1:8080/mode/run \
+  --prompt "chat benchmark prompt" \
   --requests 20 \
   --warmup 3 \
   --out docs/results/benchmark-domains.json
@@ -55,5 +56,5 @@ python3 scripts/benchmark_api.py \
 ## Interpretation guidance
 
 - Focus on p95 and p99 for user-visible stability
-- Compare `/generate` and `/generate/domains` latencies
+- Compare `/generate` and `/mode/run` (domains mode) latencies
 - Correlate benchmark run with `/stats` values to confirm persistence/observability

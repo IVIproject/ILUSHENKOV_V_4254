@@ -52,6 +52,59 @@ API is available through Nginx at:
 curl http://127.0.0.1:8080/health
 ```
 
+## 4 working modes (single endpoint)
+
+Unified endpoint:
+
+```bash
+POST /mode/run
+```
+
+Supported modes:
+
+1. `chat` - standard assistant response
+2. `domains` - domain list generation without numbering/comments
+3. `php_page` - content generation into provided page template
+4. `support_faq` - support response using imported FAQ history
+
+Mode examples:
+
+```bash
+# 1) chat
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"chat","payload":{"prompt":"Коротко опиши услугу VPS-хостинга"}}'
+
+# 2) domains
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"domains","payload":{"business_context":"регистрация доменов и хостинг","keywords":["domain","cloud"],"zone":".ru","count":5}}'
+
+# 3) php_page
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"php_page","payload":{"template_html":"<html><body><h1>Услуга</h1><div>{{content}}</div></body></html>","content_prompt":"Подготовь текст для страницы услуги VPS"}}'
+
+# 4) support_faq
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"support_faq","payload":{"question":"Как продлить домен?","max_context_items":5}}'
+```
+
+FAQ import examples:
+
+```bash
+# structured FAQ import
+curl -X POST "http://127.0.0.1:8080/support/faq/import" \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"question":"Как продлить домен?","answer":"Продление доступно в личном кабинете.","source":"support_chat"}]}'
+
+# import from support transcript text
+curl -X POST "http://127.0.0.1:8080/support/dialogs/import" \
+  -H "Content-Type: application/json" \
+  -d '{"transcript":"Q: Как продлить домен?\nA: Через личный кабинет."}'
+```
+
 - Generic text generation:
 
 ```bash

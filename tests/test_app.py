@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 os.environ["DATABASE_URL"] = "sqlite:////tmp/ai_servise_test.db"
 os.environ["OLLAMA_HOST"] = "http://fake-ollama"
@@ -8,6 +9,7 @@ os.environ["LOG_LEVEL"] = "INFO"
 from fastapi.testclient import TestClient
 import app.main as main_module
 from app.db import Base, engine
+from app.models import SupportFaqEntry
 
 class FakeClient:
     def list(self):
@@ -15,10 +17,22 @@ class FakeClient:
 
     def chat(self, model, messages, stream=False):
         text = messages[0]["content"]
-        if "Верни только список по одному домену в строке." in text:
+        if "Generate ONLY domain names" in text:
             return {
                 "message": {
                     "content": "cloudhost.ru\nfastvps.ru\nsecurezone.ru\n"
+                }
+            }
+        if "Generate ONLY page text content" in text:
+            return {
+                "message": {
+                    "content": "Надежный VPS-хостинг для бизнеса. Быстрый запуск и поддержка 24/7."
+                }
+            }
+        if "technical support assistant" in text:
+            return {
+                "message": {
+                    "content": "Продлить домен можно в личном кабинете в разделе управления услугами."
                 }
             }
         if stream:
@@ -32,6 +46,12 @@ class FakeClient:
 
 main_module.client = FakeClient()
 Base.metadata.create_all(bind=engine)
+
+
+def _clear_faq_table():
+    with main_module.SessionLocal() as db:
+        db.query(SupportFaqEntry).delete()
+        db.commit()
 
 client = TestClient(main_module.app)
 
@@ -88,3 +108,109 @@ def test_stats():
     assert "total_requests" in data
     assert data["total_requests"] >= 1
     assert "requests_last_24h" in data
+
+
+def test_mode_chat():
+    r = client.post(
+        "/mode/run",
+        json={"mode": "chat", "payload": {"prompt": "Привет!"}},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["mode"] == "chat"
+    assert isinstance(data["result"]["text"], str)
+
+
+def test_mode_domains_list():
+    r = client.post(
+        "/mode/run",
+        json={
+            "mode": "domains",
+            "payload": {
+                "business_context": "Сервис регистрации доменов",
+                "zone": ".ru",
+                "count": 3,
+            },
+        },
+    )
+    assert r.status_code == 200
+    out = r.json()["result"]["suggestions"]
+    assert len(out) == 3
+    assert all(x.endswith(".ru") for x in out)
+    assert all(" " not in x for x in out)
+
+
+def test_mode_php_template():
+    template = "<html><body><h1>{{title}}</h1><p>{{content}}</p></body></html>"
+    r = client.post(
+        "/mode/run",
+        json={
+            "mode": "php_page",
+            "payload": {
+                "content_prompt": "Услуга VPS-хостинга",
+                "template_html": template,
+            },
+        },
+    )
+    assert r.status_code == 200
+    output = r.json()["result"]["php_page"]
+    assert "<html>" in output
+    assert "{{content}}" not in output
+    assert "{{content}}" not in output
+
+
+def test_faq_import_and_support_mode():
+    _clear_faq_table()
+    items = [
+        {
+            "question": "Как продлить домен?",
+            "answer": "Продлить домен можно в личном кабинете.",
+            "source": "support_chat",
+        }
+    ]
+    r_import = client.post("/support/faq/import", json={"items": items})
+    assert r_import.status_code == 200
+    assert r_import.json()["imported"] >= 1
+
+    r_mode = client.post(
+        "/mode/run",
+        json={
+                "mode": "support_faq",
+            "payload": {"question": "Как продлить домен?"},
+        },
+    )
+    assert r_mode.status_code == 200
+    data = r_mode.json()
+    assert data["mode"] == "support_faq"
+    assert "личном кабинете" in data["result"]["answer"]
+
+
+def test_support_dialog_import():
+    _clear_faq_table()
+    fd, path = tempfile.mkstemp(prefix="support_dialog_", suffix=".csv")
+    os.close(fd)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(
+                "question,answer\n"
+                "\"Где найти DNS?\",\"DNS доступны в панели управления доменом.\""
+            )
+        with open(path, "r", encoding="utf-8") as f:
+            csv_text = f.read()
+        r = client.post(
+            "/support/faq/import",
+            json={
+                "items": [
+                    {
+                        "question": "Где найти DNS?",
+                        "answer": "DNS доступны в панели управления доменом.",
+                        "source": "support_chat",
+                    }
+                ]
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["imported"] >= 1
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
