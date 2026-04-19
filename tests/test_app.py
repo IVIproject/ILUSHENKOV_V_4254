@@ -3,7 +3,7 @@ os.environ["DATABASE_URL"] = "sqlite:////tmp/ai_servise_test.db"
 os.environ["OLLAMA_HOST"] = "http://fake-ollama"
 os.environ["OLLAMA_MODEL"] = "qwen2.5:3b"
 os.environ["LOG_LEVEL"] = "INFO"
-os.environ["ADMIN_API_KEY"] = ""
+os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["GATEWAY_PROVIDER_API_KEY"] = "test-provider-key"
 
 from fastapi.testclient import TestClient
@@ -196,7 +196,7 @@ def test_faq_import_and_support_mode():
             "source": "support_chat",
         }
     ]
-    r_import = client.post("/support/faq/import", json={"items": items})
+    r_import = client.post("/support/faq/import", json={"items": items}, headers={"X-API-Key": "test-admin-key"})
     assert r_import.status_code == 200
     assert r_import.json()["imported"] >= 1
 
@@ -218,6 +218,7 @@ def test_support_dialog_import():
     r = client.post(
         "/support/dialogs/import",
         json={"transcript": "Q: Где найти DNS?\nA: DNS доступны в панели управления доменом."},
+        headers={"X-API-Key": "test-admin-key"},
     )
     assert r.status_code == 200
     assert r.json()["parsed_pairs"] >= 1
@@ -228,6 +229,7 @@ def test_support_faq_relevance_limit():
     _clear_faq_table()
     r_import = client.post(
         "/support/faq/import",
+        headers={"X-API-Key": "test-admin-key"},
         json={
             "items": [
                 {
