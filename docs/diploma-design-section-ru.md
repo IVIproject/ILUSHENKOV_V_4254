@@ -1,265 +1,237 @@
-# Раздел диплома «ПРОЕКТИРОВАНИЕ» (детализированный шаблон для проекта `ai-servise`)
+# Раздел диплома «ПРОЕКТИРОВАНИЕ» по проекту `ai-servise`
 
-> Ниже — готовый, развёрнутый текст именно для главы **«Проектирование»**. Его можно вставлять в диплом как отдельную главу (или как крупный подраздел главы «Разработка»).
-
----
-
-## 1. Цели и задачи проектирования
-
-### 1.1 Цель проектирования
-
-Цель этапа проектирования — формально описать будущую программную систему `ai-servise` как совокупность взаимосвязанных компонентов, интерфейсов и хранилищ данных, чтобы обеспечить:
-
-- реализуемость заявленных бизнес-сценариев;
-- масштабируемость при увеличении нагрузки;
-- контролируемую безопасность доступа;
-- наблюдаемость (логирование и метрики);
-- воспроизводимость развертывания и экспериментов.
-
-### 1.2 Задачи проектирования
-
-На этапе проектирования решаются следующие задачи:
-
-1. Выделение акторов (пользователь, администратор, внешние интеграции, LLM-провайдеры).
-2. Декомпозиция системы на контейнеры и внутренние компоненты.
-3. Определение API-контрактов и форматов обмена.
-4. Проектирование схемы хранения данных и ключевых сущностей.
-5. Проектирование потоков выполнения (sequence) для критичных сценариев.
-6. Проектирование мер безопасности, отказоустойчивости и расширяемости.
+> Раздел написан по фактической реализации из репозитория. Текст можно вставлять в диплом практически без доработки.
 
 ---
 
-## 2. Проектирование на уровне требований
+## 1. Проектирование на уровне требований
 
-### 2.1 Функциональные требования (для проектных решений)
+### 1.1 Функциональные требования (что реально реализовано)
 
-Система должна поддерживать:
+Система `ai-servise` должна обеспечивать:
 
-- генерацию текста в синхронном режиме;
-- потоковую генерацию (streaming);
-- специализированный режим генерации доменных имен;
-- FAQ-режим на основе импортируемых Q/A-пар;
-- генерацию PHP-страницы по шаблону;
-- gateway-функционал (регистрация, авторизация, каталог моделей, тарификация);
-- OpenAI-совместимые эндпоинты для внешних клиентов.
+1. Проверку работоспособности сервиса: `GET /health`.
+2. Обычную генерацию текста: `POST /generate`.
+3. Потоковую генерацию (стриминг): `POST /generate/stream`.
+4. Генерацию доменных имен: `POST /generate/domains`.
+5. Унифицированный запуск режимов: `POST /mode/run` (режимы: `chat`, `domains`, `support_faq`; `php_page` в mode-run отключен).
+6. Импорт FAQ: `POST /support/faq/import`.
+7. Импорт FAQ из диалогов: `POST /support/dialogs/import`.
+8. Ответ по FAQ: `POST /support/faq/ask`.
+9. Генерацию PHP-файла из шаблона: `POST /page-template/generate-file`.
+10. Gateway-кабинет: регистрация/логин, каталог моделей, генерация, история, админ-панель.
+11. OpenAI-совместимый слой поверх gateway: `GET /v1/models`, `POST /v1/chat/completions`.
 
-### 2.2 Нефункциональные требования
+### 1.2 Нефункциональные требования
 
-Ключевые нефункциональные требования, влияющие на проектирование:
+- **Производительность:** приемлемая задержка ответов для локальных и внешних моделей.
+- **Наблюдаемость:** лог запросов, usage-логи gateway, endpoint статистики `/stats`.
+- **Безопасность:** ключи доступа и разделение ролей (user/admin).
+- **Расширяемость:** возможность добавлять модели в каталог без переписывания API-контрактов.
+- **Развертываемость:** запуск через Docker Compose (nginx + api + postgres).
 
-- **Производительность:** приемлемые latency для генерации и gateway-запросов.
-- **Безопасность:** разграничение прав, ключевая аутентификация, базовая защита админ-операций.
-- **Надежность:** корректная обработка ошибок провайдеров моделей.
-- **Поддерживаемость:** модульная структура backend-кода.
-- **Переносимость:** контейнерное развертывание через Docker Compose.
-- **Наблюдаемость:** журнал запросов и вычисляемая статистика по эксплуатации.
+### 1.3 Команды для запуска потоковой генерации (стриминг)
+
+Ниже готовые команды, которые можно вставить в раздел «Проверка требований» и использовать в демо.
+
+```bash
+# 1) Проверка, что сервис доступен
+curl http://127.0.0.1:8080/health
+
+# 2) Стриминг генерации (получение чанков)
+curl -N -X POST "http://127.0.0.1:8080/generate/stream" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Напиши 5 коротких слоганов для хостинга"}'
+```
+
+Ожидаемая логика ответа: сервис возвращает NDJSON-чанки, а в конце — завершающий объект с `done=true`.
+
+### 1.4 Важное уточнение про OpenAI-совместимость и OpenRouter
+
+В проекте нет обязательной зависимости от официального облака OpenAI как провайдера модели. Реализация использует **OpenAI-совместимый формат запросов/ответов** и может направлять вызовы в **OpenRouter** (через `OPENAI_BASE_URL=https://openrouter.ai/api/v1` и ваш `OPENAI_API_KEY` формата `sk-or-v1-...`).
+
+То есть формулировка для диплома корректная такая:
+
+- «В системе реализован OpenAI-совместимый API-слой для внешних клиентов; фактический внешний провайдер — OpenRouter».
 
 ---
 
-## 3. Архитектурное проектирование (уровень контекста и контейнеров)
+## 2. Архитектурное проектирование
 
-### 3.1 Контекстная диаграмма системы (C4, Level 1)
-
-**Что показать на диаграмме:**
-
-- границу системы `ai-servise`;
-- внешних акторов и системы;
-- типы взаимодействия (HTTP API, браузерный доступ, LLM API).
-
-**Какие блоки добавить:**
-
-1. **Пользователь API** (клиентское приложение / curl / Postman).
-2. **Пользователь Gateway UI** (браузер).
-3. **Администратор** (браузер + админ-эндпоинты).
-4. **Система `ai-servise`** (единая граница).
-5. **Ollama** (внешний сервис локальных моделей).
-6. **OpenRouter/OpenAI-compatible endpoint** (внешний облачный провайдер).
-
-**Подписи на стрелках (обязательно):**
-
-- Пользователь API -> `ai-servise`: `HTTPS JSON (REST): /generate, /mode/run, /support/*`.
-- Пользователь Gateway UI -> `ai-servise`: `HTTPS + HTML/JS: /gateway/*`.
-- Администратор -> `ai-servise`: `Admin REST: /gateway/admin/*`.
-- `ai-servise` -> Ollama: `HTTP API (chat/list)`.
-- `ai-servise` -> OpenRouter: `OpenAI-compatible chat/completions`.
-
-**Рекомендуемая вставка (Mermaid):**
+### 2.1 Контекстная диаграмма (C4 L1)
 
 ```mermaid
 flowchart LR
-    A[Пользователь API] -->|REST JSON| S[Система ai-servise]
-    B[Пользователь Gateway UI] -->|Browser HTTP| S
-    C[Администратор] -->|Admin API/UI| S
-    S -->|LLM calls| O[Ollama]
-    S -->|OpenAI-compatible API| R[OpenRouter]
+    U1[Пользователь API] -->|REST JSON| S[ai-servise]
+    U2[Пользователь Web UI] -->|HTTP/HTML/JS| S
+    A[Администратор] -->|Admin API/UI| S
+    S -->|HTTP API chat/list| O[Ollama]
+    S -->|OpenAI-compatible chat/completions| R[OpenRouter]
 ```
 
----
+Подписи, которые оставить под рисунком:
 
-### 3.2 Контейнерная диаграмма (C4, Level 2)
+- Пользователь API: работает с `/generate`, `/generate/stream`, `/generate/domains`, `/mode/run`, `/support/*`.
+- Пользователь Web UI: работает с `/gateway/*` HTML-страницами.
+- Внешний облачный провайдер: OpenRouter по OpenAI-совместимому протоколу.
 
-**Цель:** показать, из каких runtime-контейнеров состоит решение и как они соединены.
-
-**Контейнеры и их роли:**
-
-1. **Nginx (reverse proxy)**
-   - точка входа по порту 8080;
-   - маршрутизация HTTP-трафика к API-сервису.
-2. **FastAPI application (`app.main`)**
-   - бизнес-логика всех режимов;
-   - gateway и OpenAI-совместимый слой;
-   - доступ к БД и внешним LLM.
-3. **PostgreSQL**
-   - хранение логов, FAQ, пользователей, моделей, usage-метрик.
-4. **Ollama (внешний daemon)**
-   - инференс локальных моделей.
-5. **OpenRouter/OpenAI provider**
-   - инференс внешней модели.
-
-**Подписи стрелок:**
-
-- `Client -> Nginx`: `HTTP :8080`.
-- `Nginx -> FastAPI`: `proxy_pass /`.
-- `FastAPI -> PostgreSQL`: `SQLAlchemy + psycopg`.
-- `FastAPI -> Ollama`: `HTTP /api/chat`.
-- `FastAPI -> OpenRouter`: `POST /chat/completions`.
-
-**Рекомендуемая диаграмма:**
+### 2.2 Контейнерная диаграмма (C4 L2)
 
 ```mermaid
 flowchart TB
-    U[Client / Browser] --> N[Nginx :8080]
-    N --> A[FastAPI app.main :8000]
-    A --> D[(PostgreSQL)]
-    A --> O[Ollama host]
-    A --> R[OpenRouter / OpenAI API]
+    C[Client / Browser] --> N[Nginx :8080]
+    N --> API[FastAPI app.main :8000]
+    API --> DB[(PostgreSQL)]
+    API --> O[Ollama daemon\nhost.docker.internal:11434]
+    API --> OR[OpenRouter Internet Endpoint]
 ```
 
-**Что подписать в дипломе под рисунком:**
+Текст под рисунком:
 
-- «Рисунок X — Контейнерная архитектура развертывания `ai-servise`».
-- В пояснении отдельно отметить, что `Ollama` не обязательно контейнеризуется в данном compose, а подключается как внешний host service.
+- Точка входа — `nginx` (порт 8080).
+- Бизнес-логика и API-контракты — `api` (FastAPI).
+- Персистентность — `postgres`.
+- Ollama подключается как внешний runtime (через host gateway), OpenRouter — внешний интернет endpoint.
 
 ---
 
-## 4. Компонентное проектирование backend (уровень кода)
+## 3. Группировка API по подсистемам (полностью заполнено)
 
-### 4.1 Декомпозиция FastAPI-приложения
+### 3.1 Базовый API
 
-На компонентном уровне backend проектируется как набор модулей:
+- `GET /health`
+- `POST /generate`
+- `POST /generate/stream`
+- `POST /generate/domains`
+- `POST /mode/run`
+- `GET /history`
+- `GET /stats`
 
-- **`app.main`** — слой маршрутизации и orchestration;
-- **`app.schemas`** — Pydantic-контракты входа/выхода;
-- **`app.models`** — ORM-сущности БД;
-- **`app.services`** — прикладные режимы и алгоритмы post-processing;
-- **`app.gateway_services`** — провайдеры моделей, токены/стоимость, auth-утилиты;
-- **`app.page_templates`** — обработка placeholder-шаблонов PHP;
-- **`app.db` / `app.settings`** — инфраструктурная конфигурация.
+### 3.2 FAQ и шаблоны
 
-### 4.2 Компонентная диаграмма внутри API
+- `POST /support/faq/import`
+- `POST /support/dialogs/import`
+- `POST /support/faq/ask`
+- `POST /page-template/generate-file`
+- `POST /page-template/prepare-hosting`
 
-**Что обязательно отразить:**
+### 3.3 Gateway + OpenAI-совместимый слой
 
-1. Входной request приходит в `app.main`.
-2. `app.main` валидирует payload через `app.schemas`.
-3. Для бизнес-операции вызывает `app.services` / `app.gateway_services`.
-4. Для чтения/записи — обращается к `SessionLocal` и ORM-моделям.
-5. Возвращает сериализованный response.
+- Публичные UI-страницы gateway:
+  - `GET /gateway`, `/gateway/login`, `/gateway/register`, `/gateway/profile`, `/gateway/models/page`, `/gateway/model/{model_id}`, `/gateway/history`, `/gateway/admin`
+- Gateway API:
+  - `POST /gateway/register`
+  - `POST /gateway/login`
+  - `GET /gateway/me`
+  - `GET /gateway/models`
+  - `GET /gateway/models/{model_id}`
+  - `POST /gateway/generate`
+  - `GET /gateway/usage`
+- Gateway Admin API:
+  - `GET /gateway/admin/users`
+  - `PATCH /gateway/admin/users/{user_id}`
+  - `GET /gateway/admin/users/{user_id}/usage`
+  - `DELETE /gateway/admin/users/{user_id}`
+  - `GET /gateway/admin/models`
+  - `POST /gateway/admin/models`
+  - `PATCH /gateway/admin/models/{model_id}`
+  - `DELETE /gateway/admin/models/{model_id}`
+- OpenAI-совместимые:
+  - `GET /v1/models`
+  - `POST /v1/chat/completions`
 
-**Рекомендуемая диаграмма:**
+---
+
+## 4. Контрактные требования к API (что уже есть в проекте)
+
+### 4.1 Авторизационные контракты
+
+1. `X-API-Key` — используется для:
+   - `POST /support/faq/import`
+   - `POST /support/dialogs/import`
+2. `X-Gateway-Key` — требуется для пользовательского gateway API:
+   - `/gateway/me`, `/gateway/models*`, `/gateway/generate`, `/gateway/usage`.
+3. Gateway admin-права — для `/gateway/admin/*` (проверка роли admin).
+4. `Authorization: Bearer <gateway_key>` — для `/v1/models` и `/v1/chat/completions`.
+
+### 4.2 Валидация payload (уже реализована через Pydantic)
+
+- Ограничения длины prompt, параметров temperature/max_tokens, лимитов выборки и др. заданы в `app/schemas.py`.
+- На уровне API возвращаются корректные HTTP-статусы при нарушении контракта (`400`, `401`, `403`, `404`, `409`, `500`, `502`).
+
+### 4.3 Поведенческие контракты
+
+- `/generate/stream` возвращает `application/x-ndjson`.
+- `/gateway/generate` возвращает также токены и вычисленную стоимость (`tokens_spent`).
+- `/v1/chat/completions` возвращает OpenAI-совместимую структуру `choices` и `usage`.
+
+---
+
+## 5. Диаграмма маршрутизации API
 
 ```mermaid
-flowchart LR
-    RQ[HTTP Request] --> M[app.main]
-    M --> S[app.schemas]
-    M --> SV[app.services]
-    M --> GS[app.gateway_services]
-    M --> ORM[app.models + SessionLocal]
-    ORM --> DB[(PostgreSQL)]
-    M --> RS[HTTP Response]
+flowchart TD
+    IN[/HTTP Request/] --> R{Route Group}
+
+    R --> B[Basic API]
+    R --> F[FAQ & Templates]
+    R --> G[Gateway API]
+    R --> O[OpenAI-compatible]
+
+    B --> B1[/health]
+    B --> B2[/generate]
+    B --> B3[/generate/stream]
+    B --> B4[/generate/domains]
+    B --> B5[/mode/run]
+    B --> B6[/history]
+    B --> B7[/stats]
+
+    F --> F1[/support/faq/import\nX-API-Key]
+    F --> F2[/support/dialogs/import\nX-API-Key]
+    F --> F3[/support/faq/ask]
+    F --> F4[/page-template/generate-file]
+
+    G --> G1[/gateway/register]
+    G --> G2[/gateway/login]
+    G --> G3[/gateway/me\nX-Gateway-Key]
+    G --> G4[/gateway/models*\nX-Gateway-Key]
+    G --> G5[/gateway/generate\nX-Gateway-Key]
+    G --> GA[/gateway/admin/*\nAdmin role]
+
+    O --> O1[/v1/models\nBearer gateway key]
+    O --> O2[/v1/chat/completions\nBearer gateway key]
 ```
 
-**Подписи блоков:**
-
-- `app.main` — «API orchestration + routes».
-- `app.services` — «режимы генерации, FAQ ranking, парсинг».
-- `app.gateway_services` — «auth, pricing, provider adapters».
-- `app.models` — «персистентные сущности».
-
 ---
 
-## 5. Проектирование API-интерфейсов
+## 6. Проектирование модели данных и ER-диаграмма
 
-### 5.1 Группировка API по подсистемам
+### 6.1 Почему в ER видны 2 связанные таблицы + 4 несвязанных
 
-Для проектной документации полезно разделить API на 3 группы:
+Да, для текущей реализации это нормально и логически обосновано:
 
-1. **Базовый API**
-   - `/health`, `/generate`, `/generate/stream`, `/generate/domains`, `/mode/run`, `/history`, `/stats`.
-2. **FAQ и шаблоны**
-   - `/support/faq/import`, `/support/dialogs/import`, `/support/faq/ask`, `/page-template/generate-file`.
-3. **Gateway + OpenAI compatible**
-   - `/gateway/*`, `/v1/models`, `/v1/chat/completions`.
+- **Явная фактическая связь в коде:** `gateway_users (1) -> (N) gateway_usage_logs` по `user_id`.
+- Остальные таблицы в текущем дизайне используются как:
+  - `request_logs` — общий журнал генераций;
+  - `support_faq_entries` — база знаний;
+  - `support_faq_query_metrics` — аналитика качества FAQ;
+  - `ai_models_catalog` — справочник моделей/тарифов.
 
-### 5.2 Контрактные требования к API
+Они связаны **логически через бизнес-процессы**, но не через жесткие внешние ключи. Это допустимо для диплома, если прямо указать, что часть связей soft/logical, а не hard FK.
 
-В проектировании нужно формально зафиксировать:
-
-- обязательные заголовки (`X-Gateway-Key`, `Authorization: Bearer ...`, `X-API-Key`);
-- допустимые диапазоны параметров (`max_tokens`, `temperature`, `limit`);
-- единый формат ошибок (рекомендуется доработать до стандартизированного error schema);
-- правила обратной совместимости (изменения без breaking changes).
-
-### 5.3 Диаграмма маршрутизации API
-
-**Что нарисовать:**
-
-- единая точка входа `/`;
-- ветки на `basic`, `support`, `gateway`, `openai-compatible`;
-- подписи «Auth required / No auth / Admin only».
-
-**Подписи веток:**
-
-- Basic: `mostly public endpoints`.
-- Support import: `admin api key required`.
-- Gateway: `X-Gateway-Key required`.
-- Admin gateway: `gateway admin role required`.
-- OpenAI compatible: `Bearer gateway key`.
-
----
-
-## 6. Проектирование модели данных
-
-### 6.1 Логическая модель данных
-
-Сущности и назначение:
-
-1. `request_logs` — хранение пользовательских prompt/answer для базовой аналитики.
-2. `support_faq_entries` — база знаний FAQ.
-3. `support_faq_query_metrics` — метрики релевантности FAQ-ответов.
-4. `gateway_users` — учетные записи и API-ключи пользователей.
-5. `ai_models_catalog` — каталог доступных моделей и ценовые параметры.
-6. `gateway_usage_logs` — использование моделей и стоимость по токенам.
-
-### 6.2 ER-диаграмма (что именно рисовать)
-
-**Обязательные связи:**
-
-- `gateway_users (1) -> (N) gateway_usage_logs` по `user_id`.
-- `ai_models_catalog` логически связано с `gateway_usage_logs.model_key` (даже если внешнего FK нет — отметить как soft relation).
-- `support_faq_entries` используется при расчете `support_faq_query_metrics` (logical dependency).
-
-**Рекомендуемая Mermaid ER-диаграмма:**
+### 6.2 ER-диаграмма
 
 ```mermaid
 erDiagram
-    GATEWAY_USERS ||--o{ GATEWAY_USAGE_LOGS : "uses"
+    GATEWAY_USERS ||--o{ GATEWAY_USAGE_LOGS : "user_id"
+
     REQUEST_LOGS {
       int id PK
       text prompt
       text answer
       datetime created_at
     }
+
     SUPPORT_FAQ_ENTRIES {
       int id PK
       text question
@@ -267,6 +239,7 @@ erDiagram
       string source
       datetime created_at
     }
+
     SUPPORT_FAQ_QUERY_METRICS {
       int id PK
       text question
@@ -278,6 +251,20 @@ erDiagram
       string source_mode
       datetime created_at
     }
+
+    AI_MODELS_CATALOG {
+      int id PK
+      string model_key
+      string display_name
+      string provider
+      string target_model
+      float price_per_1k_tokens
+      float external_price_per_1k_tokens
+      float markup_percent
+      bool is_active
+      datetime created_at
+    }
+
     GATEWAY_USERS {
       int id PK
       string email
@@ -287,14 +274,7 @@ erDiagram
       bool is_active
       datetime created_at
     }
-    AI_MODELS_CATALOG {
-      int id PK
-      string model_key
-      string provider
-      string target_model
-      float price_per_1k_tokens
-      bool is_active
-    }
+
     GATEWAY_USAGE_LOGS {
       int id PK
       int user_id
@@ -310,35 +290,11 @@ erDiagram
     }
 ```
 
-### 6.3 Что подписать в тексте под ER-диаграммой
-
-- какие сущности являются операционными (gateway_usage_logs);
-- какие аналитическими (support_faq_query_metrics, request_logs);
-- какие справочными (ai_models_catalog).
-
-Это важно для обоснования будущего масштабирования и архивирования.
-
 ---
 
-## 7. Проектирование ключевых сценариев (sequence diagrams)
+## 7. Проектирование ключевых сценариев (диаграммы для всех сценариев)
 
-Ниже — сценарии, которые нужно показать в дипломе обязательно.
-
-### 7.1 Сценарий A: базовая генерация `/generate`
-
-**Участники:** Client, Nginx, FastAPI, Ollama, PostgreSQL.
-
-**Логика:**
-
-1. Client отправляет prompt.
-2. Nginx проксирует запрос в FastAPI.
-3. FastAPI валидирует запрос.
-4. FastAPI вызывает Ollama.
-5. Получает ответ модели.
-6. Сохраняет пару prompt/answer в `request_logs`.
-7. Возвращает ответ клиенту.
-
-**Mermaid:**
+### 7.1 Сценарий A — обычная генерация `/generate`
 
 ```mermaid
 sequenceDiagram
@@ -349,210 +305,282 @@ sequenceDiagram
     participant P as PostgreSQL
 
     C->>N: POST /generate
-    N->>A: proxy request
-    A->>A: validate payload
-    A->>O: chat(model, prompt)
-    O-->>A: generated text
+    N->>A: proxy
+    A->>O: chat(prompt)
+    O-->>A: answer
     A->>P: INSERT request_logs
-    A-->>N: 200 JSON
-    N-->>C: response
+    A-->>N: 200 {answer}
+    N-->>C: JSON
 ```
 
----
+### 7.2 Сценарий B — потоковая генерация `/generate/stream`
 
-### 7.2 Сценарий B: gateway генерация `/gateway/generate`
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant N as Nginx
+    participant A as FastAPI
+    participant O as Ollama
+    participant P as PostgreSQL
 
-**Участники:** Client, FastAPI, PostgreSQL, Ollama/OpenRouter.
+    C->>N: POST /generate/stream
+    N->>A: proxy
+    A->>O: chat(stream=true)
+    loop chunks
+        O-->>A: partial chunk
+        A-->>N: NDJSON chunk
+        N-->>C: NDJSON chunk
+    end
+    A->>P: INSERT request_logs(full_answer)
+    A-->>C: done=true
+```
 
-**Логика:**
+### 7.3 Сценарий C — gateway генерация `/gateway/generate`
 
-1. Проверка `X-Gateway-Key` и активности пользователя.
-2. Разрешение модели из `ai_models_catalog`.
-3. Вызов провайдера по `provider` (`ollama` или `openai`).
-4. Оценка/получение token usage.
-5. Расчёт стоимости.
-6. Запись результата в `gateway_usage_logs`.
-7. Возврат ответа + токенов + стоимости.
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant P as PostgreSQL
+    participant L as Ollama/OpenRouter
 
-**Подписи, которые важно поставить у стрелок:**
+    C->>A: POST /gateway/generate + X-Gateway-Key
+    A->>P: validate user key + active
+    A->>P: resolve model in ai_models_catalog
+    A->>L: generate via provider
+    L-->>A: answer + usage
+    A->>A: compute charge
+    A->>P: INSERT gateway_usage_logs
+    A-->>C: answer + tokens + tokens_spent
+```
 
-- `Auth: X-Gateway-Key`.
-- `Resolve model_id -> target_model`.
-- `Compute charge(cost_per_1k)`.
+### 7.4 Сценарий D — FAQ ответ `/support/faq/ask`
 
----
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant P as PostgreSQL
+    participant O as Ollama
 
-### 7.3 Сценарий C: FAQ-ответ `/support/faq/ask`
+    C->>A: POST /support/faq/ask
+    A->>P: SELECT support_faq_entries LIMIT 200
+    A->>A: relevance ranking (token overlap)
+    A->>O: generate with selected FAQ context
+    O-->>A: answer
+    A->>P: INSERT request_logs
+    A->>P: INSERT support_faq_query_metrics
+    A-->>C: answer + matched_items
+```
 
-**Участники:** Client, FastAPI, PostgreSQL, Ollama.
+### 7.5 Сценарий E — OpenAI-совместимый вызов `/v1/chat/completions`
 
-**Логика:**
+```mermaid
+sequenceDiagram
+    participant C as External Client
+    participant A as FastAPI OpenAI-compatible
+    participant G as gateway_generate
+    participant P as PostgreSQL
+    participant L as Ollama/OpenRouter
 
-1. Из БД выбираются последние FAQ-записи.
-2. Выполняется ранжирование релевантности.
-3. Формируется контекст из top-N пар.
-4. Запрос к модели с FAQ-контекстом.
-5. Сохранение ответа и quality-метрик.
-6. Возврат ответа и `matched_items`.
-
-**Подписи у стрелок:**
-
-- `SELECT support_faq_entries LIMIT 200`.
-- `rank by token overlap`.
-- `INSERT support_faq_query_metrics`.
+    C->>A: POST /v1/chat/completions (Bearer key)
+    A->>A: validate bearer -> gateway user
+    A->>G: map request to GatewayGenerateRequest
+    G->>P: model resolve + auth checks
+    G->>L: provider call
+    L-->>G: answer + usage
+    G->>P: INSERT gateway_usage_logs
+    G-->>A: GatewayGenerateResponse
+    A-->>C: OpenAI-compatible JSON (choices, usage)
+```
 
 ---
 
 ## 8. Проектирование безопасности
 
-### 8.1 Модель доступа
+### 8.1 Модель доступа (полная)
 
-Рекомендуется формально описать уровни:
+1. **Public endpoints** (без ключа):
+   - `/health`, `/generate`, `/generate/stream`, `/generate/domains`, `/mode/run`, `/history`, `/stats`, `/support/faq/ask`, `/page-template/generate-file`.
+2. **Admin API key (`X-API-Key`)**:
+   - `/support/faq/import`, `/support/dialogs/import`.
+3. **Gateway user key (`X-Gateway-Key`)**:
+   - `/gateway/me`, `/gateway/models*`, `/gateway/generate`, `/gateway/usage`.
+4. **Gateway admin role**:
+   - все `/gateway/admin/*`.
+5. **Bearer gateway key**:
+   - `/v1/models`, `/v1/chat/completions`.
 
-1. **Публичный доступ**: часть базовых эндпоинтов.
-2. **Админ-ключ (`X-API-Key`)**: импорт FAQ/диалогов.
-3. **Gateway-ключ (`X-Gateway-Key`)**: пользовательский gateway-функционал.
-4. **Роль admin в gateway**: управление пользователями/моделями.
-5. **Bearer gateway key**: OpenAI-совместимые эндпоинты.
+### 8.2 Диаграмма авторизации
 
-### 8.2 Диаграмма авторизации (что нарисовать)
+```mermaid
+flowchart TD
+    START([Request]) --> TYPE{Endpoint type}
 
-Сделай decision-flow:
+    TYPE -->|Public| OK1[Allow 200/4xx by payload]
 
-- есть ли нужный заголовок?
-- найден ли пользователь?
-- активен ли пользователь?
-- имеет ли роль admin (для admin route)?
+    TYPE -->|Support import| K1{X-API-Key valid?}
+    K1 -->|No| E401a[401 Unauthorized]
+    K1 -->|Yes| OK2[Allow]
 
-В каждом узле предусмотреть подписи `401`, `403`, `200`.
+    TYPE -->|Gateway user| K2{X-Gateway-Key present?}
+    K2 -->|No| E401b[401 Unauthorized]
+    K2 -->|Yes| U1{User exists & active?}
+    U1 -->|No| E401c[401/403]
+    U1 -->|Yes| OK3[Allow]
 
-### 8.3 Что отдельно описать текстом
+    TYPE -->|Gateway admin| K3{Gateway user validated?}
+    K3 -->|No| E401d[401]
+    K3 -->|Yes| R1{Role admin?}
+    R1 -->|No| E403[403 Forbidden]
+    R1 -->|Yes| OK4[Allow]
 
-- хранение пароля в виде hash (`salt$digest`);
-- риски API-ключей в localStorage фронтенда;
-- необходимость rate limiting и ротации ключей как проектные улучшения.
+    TYPE -->|OpenAI-compatible| B1{Authorization Bearer valid?}
+    B1 -->|No| E401e[401 Unauthorized]
+    B1 -->|Yes| OK5[Allow]
+```
 
----
+### 8.3 Что указать как ограничения и улучшения
 
-## 9. Проектирование развертывания и окружений
-
-### 9.1 Целевые окружения
-
-1. **Dev** — локальная отладка, ускоренный цикл изменений.
-2. **Demo/Stage** — демонстрация и испытания перед защитой.
-3. **Prod-like** — режим для нагрузочных замеров.
-
-### 9.2 Диаграмма deployment (что указать)
-
-- Host machine;
-- Docker network;
-- контейнеры `nginx`, `api`, `postgres`;
-- внешний `ollama` daemon (через `host.docker.internal`);
-- внешний OpenRouter endpoint (интернет).
-
-**Подписи узлов:**
-
-- `api` — `uvicorn app.main:app`.
-- `postgres` — `persistent volume pg_data`.
-- `nginx` — `public entrypoint :8080`.
+- Пароли хранятся в формате salt+hash (PBKDF2), это корректно.
+- API-ключи возвращаются и используются в клиентском UI: нужен policy по ротации и безопасному хранению.
+- Рекомендуется добавить rate limiting и аудит подозрительной активности.
 
 ---
 
-## 10. Проектирование масштабируемости и отказоустойчивости
+## 9. Диаграмма развертывания (полностью и четко)
 
-### 10.1 Масштабируемость
+```mermaid
+flowchart TB
+    subgraph HOST[Хост-машина]
+      subgraph DOCKER[Docker Network]
+        NGINX[Container: nginx\nreverse proxy :8080]
+        API[Container: api\nFastAPI/uvicorn :8000]
+        PG[Container: postgres\nDB + volume pg_data]
+      end
 
-Сформулируй в дипломе текущие ограничения и целевой дизайн:
+      OLLAMA[External daemon: Ollama\nhost.docker.internal:11434]
+    end
 
-- текущее состояние: monolith API instance + sync provider calls;
-- целевое состояние:
-  - горизонтальное масштабирование API;
-  - вынесение долгих запросов в очередь;
-  - Redis-кеш для повторяющихся запросов;
-  - read-оптимизация статистики.
+    INTERNET[(Internet)]
+    OPENROUTER[OpenRouter endpoint\nhttps://openrouter.ai/api/v1]
+    CLIENT[Client / Browser]
 
-### 10.2 Отказоустойчивость
+    CLIENT --> NGINX
+    NGINX --> API
+    API --> PG
+    API --> OLLAMA
+    API --> OPENROUTER
+    OPENROUTER --- INTERNET
+```
 
-Нужно описать проектные меры:
+Подписи к узлам в дипломе:
 
-- таймауты внешних вызовов;
-- fallback-логика для доменных имен;
-- запись ошибок провайдера в `gateway_usage_logs`;
-- health-check и контроль доступности БД/моделей.
-
-### 10.3 Диаграмма «точки отказа и меры»
-
-Сделай таблицу или схему:
-
-- «узел» -> «тип отказа» -> «симптом» -> «мера».
-
-Пример:
-
-- OpenRouter -> timeout -> 502 клиенту -> retry/backoff + резервная модель.
-- PostgreSQL -> connection error -> 500 -> pool tuning + restart policy.
-
----
-
-## 11. Проектные решения, которые нужно прямо зафиксировать в тексте
-
-1. Почему выбран API-first подход.
-2. Почему выбран гибрид локальных и внешних моделей.
-3. Почему хранится usage-cost аналитика.
-4. Почему gateway выделен как отдельный слой, а не только базовые endpoints.
-5. Почему использован Docker Compose как основной способ воспроизводимого запуска.
-
-Для каждого пункта используй структуру:
-
-- **Проблема**;
-- **Альтернативы**;
-- **Принятое решение**;
-- **Обоснование выбора**;
-- **Ограничения**.
+- `nginx`: точка входа внешнего HTTP-трафика.
+- `api`: прикладная логика, маршрутизация, интеграции с LLM.
+- `postgres`: хранение логов, FAQ, пользователей, моделей, usage.
+- `ollama`: локальный inference runtime.
+- `openrouter`: внешний OpenAI-совместимый провайдер.
 
 ---
 
-## 12. Что вставить в диплом как иллюстрации (обязательный набор)
+## 10. Масштабируемость и отказоустойчивость
 
-Минимум 6 рисунков:
+### 10.1 Сформулированные ограничения текущего решения
 
-1. Контекстная диаграмма (C4 L1).
-2. Контейнерная диаграмма (C4 L2).
-3. Компонентная диаграмма backend.
-4. ER-диаграмма БД.
-5. Sequence `/generate`.
-6. Sequence `/gateway/generate` или `/support/faq/ask`.
+Текущее состояние:
 
-**Требования к подписи рисунков:**
+- монолитный API-процесс;
+- синхронные внешние вызовы провайдерам;
+- отсутствие очереди фоновых задач;
+- ограниченная observability (без Prometheus/Grafana);
+- возможная деградация при резком росте логов.
 
-- единый стиль: «Рисунок N — ...»;
-- в подписи указать уровень (контекст/контейнер/компоненты/последовательность);
-- в тексте до и после рисунка объяснить, зачем он и что из него следует.
+Целевой дизайн развития:
+
+1. Горизонтальное масштабирование API-инстансов за балансировщиком.
+2. Вынесение долгих/тяжелых операций в очередь (Celery/RQ + Redis).
+3. Кеширование повторяющихся запросов и метаданных моделей.
+4. Введение квот и rate limiting для защиты от перегрузки.
+5. Метрики SLI/SLO и мониторинг latency/error-rate.
+
+### 10.2 Диаграмма «точки отказа и меры»
+
+```mermaid
+flowchart LR
+    O1[OpenRouter timeout] --> S1[Симптом: 502 на gateway/openai endpoints]
+    S1 --> M1[Меры: retry/backoff + fallback model + timeout tuning]
+
+    O2[Ollama model unavailable] --> S2[Симптом: generation error]
+    S2 --> M2[Меры: health-check + предзагрузка модели + graceful error]
+
+    O3[PostgreSQL недоступен] --> S3[Симптом: 500 на логирующих endpoint]
+    S3 --> M3[Меры: restart policy + connection pool tuning + backup]
+
+    O4[Спайк запросов] --> S4[Симптом: рост latency, 5xx]
+    S4 --> M4[Меры: rate limit + autoscale API + caching]
+```
 
 ---
 
-## 13. Готовый текст начала раздела «Проектирование» (можно вставить почти без правок)
+## 11. Ключевые проектные решения и обоснование (с учетом вашей бизнес-идеи)
 
-На этапе проектирования информационной системы `ai-servise` была выполнена многоуровневая архитектурная декомпозиция решения: от контекста взаимодействия с внешними акторами до внутренних компонентов backend-приложения и структуры данных. В качестве методологической основы использован подход C4 и диаграммы последовательностей UML, что позволило формализовать связи между пользовательскими сценариями, API-контрактами и механизмами персистентности.
+### 11.1 Почему API-first подход
 
-На контекстном уровне система рассматривается как единый сервис AI-генерации для доменно-хостингового сценария, взаимодействующий с конечными пользователями (через REST и web-интерфейс), внешними языковыми моделями (Ollama/OpenRouter) и внутренним контуром хранения данных (PostgreSQL). На контейнерном уровне выделены reverse proxy (Nginx), прикладной сервис FastAPI и СУБД PostgreSQL, что обеспечивает разделение ответственности сетевого уровня, бизнес-логики и хранения.
+Потому что это сразу дает два канала использования одной логики:
 
-Компонентный уровень проектирования позволил определить структуру backend-кода, где маршрутизация и orchestration сосредоточены в `app.main`, бизнес-операции — в `app.services` и `app.gateway_services`, контракты обмена — в `app.schemas`, а модель хранения — в `app.models`. Такое разделение снижает связность модулей и упрощает дальнейшее развитие решения, включая добавление новых провайдеров моделей и расширение gateway-функциональности.
+- direct API-интеграции клиентов;
+- web-кабинет как «тонкий клиент» поверх тех же API.
 
-Отдельное внимание уделено проектированию данных: выделены операционные, аналитические и справочные сущности, определены логические связи между пользователями, запросами и токенопотреблением. Это создает основу для построения отчетности, оценки стоимости эксплуатации и контроля качества ответов FAQ-подсистемы.
+Это снижает дублирование кода и упрощает развитие продукта в коммерческий сервис.
 
-Таким образом, этап проектирования обеспечил формальное описание системы, достаточное для реализации, тестирования, масштабирования и защиты проекта в рамках дипломной работы.
+### 11.2 Почему гибрид локальных и внешних моделей
+
+Вы изначально строили локальную генерацию контента, а затем добавили модель «аналог OpenRouter» как коммерческий слой. Гибридный подход дает:
+
+- локальные модели: независимость, контроль, низкая себестоимость базовых сценариев;
+- внешние модели: повышение качества/вариативности и доступ к более сильным LLM без апгрейда локального железа.
+
+### 11.3 Почему хранится аналитика затрат и использования
+
+Это напрямую связано с вашей новой бизнес-целью — монетизация простаивающих вычислительных ресурсов:
+
+- нужно понимать себестоимость и маржинальность;
+- нужно видеть токенопотребление по пользователям и моделям;
+- нужно поддерживать биллинг-логику и управленческую отчетность.
+
+### 11.4 Почему gateway выделен отдельным слоем
+
+Без gateway у вас просто набор технических endpoint’ов генерации. С gateway появляется продуктовый слой:
+
+- регистрация и ключи;
+- каталог моделей;
+- ролевая админка;
+- usage-логи и расчет стоимости;
+- OpenAI-совместимый интерфейс для внешних клиентов.
+
+Именно gateway превращает локальный инструмент в потенциальный сервис «LLM as a platform».
+
+### 11.5 Почему Docker Compose
+
+Потому что для диплома и демо важна воспроизводимость:
+
+- одной командой поднимается одинаковая среда;
+- предсказуемые зависимости и конфиги;
+- проще проводить экспериментальные замеры и повторяемые прогоны.
 
 ---
 
-## 14. Чек-лист самопроверки раздела перед сдачей
+## 12. Мини-чеклист для этого раздела
 
-Перед финальной сборкой диплома проверь:
-
-- [ ] В разделе есть минимум 6 диаграмм.
-- [ ] У каждой диаграммы есть подпись и разбор в тексте.
-- [ ] Есть явная связь «требование -> проектное решение».
-- [ ] Описана модель данных и ключевые связи.
-- [ ] Описаны security-механизмы и ограничения.
-- [ ] Описаны риски и направление масштабирования.
-- [ ] Термины и эндпоинты совпадают с фактической реализацией проекта.
+- [ ] Вставлена диаграмма контекста.
+- [ ] Вставлена контейнерная диаграмма.
+- [ ] Полностью перечислены API по группам.
+- [ ] Есть диаграмма маршрутизации API.
+- [ ] Есть ER-диаграмма и объяснение soft-связей.
+- [ ] Есть sequence-диаграммы для всех ключевых сценариев.
+- [ ] Есть диаграмма авторизации.
+- [ ] Есть deployment-диаграмма.
+- [ ] Есть диаграмма отказов и мер.
+- [ ] Зафиксированы 5 ключевых проектных решений с обоснованием.
 
