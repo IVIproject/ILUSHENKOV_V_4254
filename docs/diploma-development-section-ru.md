@@ -557,3 +557,126 @@ python3 scripts/benchmark_gateway_models.py \
 
 В результате реализации создан полнофункциональный AI-сервис с воспроизводимым развертыванием, персистентным хранением данных, набором прикладных API-режимов, gateway-слоем для продуктового доступа к моделям и OpenAI-совместимым интерфейсом для внешних клиентов. Реализация подтверждается демонстрационными сценариями, сохранением данных в БД, автотестами и нагрузочными замерами.
 
+
+---
+
+## 15. Выбор модели ИИ: что можно и что нельзя в текущей реализации
+
+### 15.1 Важно: прямой выбор модели доступен не везде
+
+В текущем коде:
+
+- `POST /gateway/generate` — **можно явно выбрать модель** через `model_id`;
+- `POST /v1/chat/completions` — **можно явно выбрать модель** через поле `model`;
+- `POST /generate/domains` — **модель не передается в запросе**, используется `OLLAMA_MODEL` из конфигурации;
+- `POST /page-template/generate-file` — **модель не передается в запросе**, используется `OLLAMA_MODEL`.
+
+То есть для доменов и PHP-файла «разные модели» сейчас делаются либо:
+
+1. через смену `OLLAMA_MODEL` в `.env` + перезапуск;
+2. либо через `/gateway/generate` с нужным `model_id` (но это даст текст, а не готовый файл-аттачмент как `/page-template/generate-file`).
+
+### 15.2 Запросы для генерации на разных моделях через gateway
+
+#### A) Домены на разных моделях
+
+```bash
+# Локальная модель 1
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: <GATEWAY_KEY>" \
+  -d '{
+    "model_id":"local/qwen2.5-3b",
+    "prompt":"Сгенерируй 10 доменных имен для хостинга в зоне .ru. Только список, один домен в строке.",
+    "max_tokens":220
+  }'
+
+# Локальная модель 2
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: <GATEWAY_KEY>" \
+  -d '{
+    "model_id":"local/llama3.2-3b",
+    "prompt":"Сгенерируй 10 доменных имен для хостинга в зоне .ru. Только список, один домен в строке.",
+    "max_tokens":220
+  }'
+
+# Внешняя модель через OpenRouter
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: <GATEWAY_KEY>" \
+  -d '{
+    "model_id":"proxy/openrouter-deepseek-chat",
+    "prompt":"Сгенерируй 10 доменных имен для хостинга в зоне .ru. Только список, один домен в строке.",
+    "max_tokens":220
+  }'
+```
+
+#### B) «PHP-контент» на разных моделях (через текстовый prompt)
+
+```bash
+# Локальная модель
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: <GATEWAY_KEY>" \
+  -d '{
+    "model_id":"local/qwen2.5-3b",
+    "prompt":"Сгенерируй контент для PHP-страницы хостинга: hero, преимущества, FAQ, CTA. Без markdown.",
+    "max_tokens":320
+  }'
+
+# Внешняя модель
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: <GATEWAY_KEY>" \
+  -d '{
+    "model_id":"proxy/openrouter-deepseek-chat",
+    "prompt":"Сгенерируй контент для PHP-страницы хостинга: hero, преимущества, FAQ, CTA. Без markdown.",
+    "max_tokens":320
+  }'
+```
+
+### 15.3 Как получить именно файл PHP на другой модели
+
+Так как `POST /page-template/generate-file` не принимает `model_id`, рабочий способ сейчас такой:
+
+1. В `.env` изменить модель:
+```env
+OLLAMA_MODEL=qwen2.5:3b
+```
+или
+```env
+OLLAMA_MODEL=llama3.2:3b
+```
+2. Перезапустить сервис:
+```bash
+docker compose up -d --build
+```
+3. Выполнить генерацию файла:
+```bash
+curl -X POST "http://127.0.0.1:8080/page-template/generate-file" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "template_name":"hosting.php",
+    "content_prompt":"Сделай продающий текст для страницы хостинга",
+    "output_filename":"hosting-generated.php"
+  }' \
+  --output hosting-generated.php
+```
+
+### 15.4 OpenAI-совместимый вариант выбора модели
+
+Можно делать то же через `POST /v1/chat/completions`, меняя поле `model`:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <GATEWAY_KEY>" \
+  -d '{
+    "model":"local/llama3.2-3b",
+    "messages":[{"role":"user","content":"Сгенерируй 8 доменов для VPS в зоне .ru"}],
+    "max_tokens":220,
+    "temperature":0.3
+  }'
+```
+
