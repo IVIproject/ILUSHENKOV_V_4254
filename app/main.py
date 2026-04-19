@@ -167,7 +167,6 @@ def _ensure_catalog_seeded(db) -> None:
     rows_by_key = {row.model_key.strip().lower(): row for row in rows}
     changed = False
 
-    # Remove deprecated external model from older catalogs.
     legacy_key = "proxy/openai-gpt-4o-mini"
     legacy_row = rows_by_key.get(legacy_key)
     if legacy_row is not None:
@@ -195,7 +194,6 @@ def _ensure_catalog_seeded(db) -> None:
             changed = True
             continue
 
-        # Keep admin pricing edits, but align identity fields with code defaults.
         if (
             existing.display_name != model.label
             or existing.provider != model.provider
@@ -288,7 +286,6 @@ def _verify_gateway_user_password(user: GatewayUser, password: str) -> bool:
     if not user.password_hash:
         return False
     if "$" not in user.password_hash:
-        # Legacy rows were saved without salt; they should be reset via re-registration.
         return False
     parts = user.password_hash.split("$", 1)
     if len(parts) != 2:
@@ -542,7 +539,6 @@ def gateway_register(payload: GatewayUserRegisterRequest):
         exists = db.query(GatewayUser).filter(GatewayUser.email == email).first()
         if exists:
             if "$" not in (exists.password_hash or ""):
-                # Recover legacy account: old rows stored digest without salt, so login cannot validate them.
                 if not exists.api_key:
                     new_key, _, _, _ = generate_api_key()
                     exists.api_key = new_key
