@@ -268,7 +268,6 @@ def extract_support_faq_pairs(transcript: str) -> list[tuple[str, str]]:
     if pairs:
         return pairs
 
-    # Fallback: split by dialog-like separators "Client:" / "Support:"
     question = None
     for line in lines:
         lower = line.lower()
