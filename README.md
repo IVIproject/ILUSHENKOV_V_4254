@@ -1,4 +1,4 @@
-# ai-servise
+# Разработка локальной системы генерации текстового контента с применением искусственного интеллекта
 
 `ai-servise` — это API‑сервис на FastAPI для корпоративных сценариев с ИИ:
 
@@ -64,19 +64,7 @@
 
 ```bash
 cp .env.example .env
-```
-
-Минимально проверьте в `.env`:
-
-```env
-OLLAMA_HOST=http://host.docker.internal:11434
-OLLAMA_MODEL=qwen2.5:3b
-OLLAMA_SECONDARY_MODEL=llama3.2:3b
-
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
-OPENAI_API_KEY=sk-or-v1-...
-
-GATEWAY_ADMIN_EMAILS=admin@example.com
+nano .env
 ```
 
 ### 3.2 Запуск
@@ -103,12 +91,6 @@ curl http://127.0.0.1:8080/health
 
 ## 4.1 Локальные модели Ollama
 
-Убедитесь, что установлены:
-
-```bash
-ollama list
-```
-
 Нужны:
 
 - `qwen2.5:3b`
@@ -120,8 +102,6 @@ ollama list
 ollama pull qwen2.5:3b
 ollama pull llama3.2:3b
 ```
-
-> Важно: pull нужно выполнять там, где реально запущен Ollama daemon.
 
 ### 4.2 Внешняя модель (OpenRouter)
 
@@ -255,17 +235,6 @@ python3 scripts/benchmark_gateway_models.py \
   --out docs/results/benchmark-gateway-3models.json
 ```
 
-Файл отчета будет содержать:
-
-- коды ответов;
-- success rate;
-- latency (min/avg/median/p95/p99/max);
-- средний размер ответа;
-- средние токены prompt/completion/total;
-- ошибки (если есть).
-
----
-
 ## 9. Полезные команды Makefile
 
 ```bash
@@ -279,11 +248,3 @@ make down
 ```
 
 ---
-
-## 10. Документация проекта
-
-- Архитектура: `docs/architecture.md`
-- Сценарий демонстрации: `docs/defense-scenario.md`
-- Методика экспериментов: `docs/experiment-methodology.md`
-- Чек-лист для отчета и защиты: `docs/report-checklist-ru.md`
-
