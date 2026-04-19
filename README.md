@@ -69,17 +69,57 @@ Add variables to `.env`:
 ```env
 OLLAMA_MODEL=qwen2.5:3b
 OLLAMA_SECONDARY_MODEL=llama3.2:3b
-OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions
-OPENAI_API_KEY=
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-...
+OPENROUTER_SITE_URL=https://your-site.example
+OPENROUTER_APP_NAME=ai-servise
 GATEWAY_ADMIN_EMAILS=admin@example.com,owner@example.com
 ```
 
 Notes:
 
 - `OLLAMA_MODEL` and `OLLAMA_SECONDARY_MODEL` are local Ollama models.
+- if `OLLAMA_SECONDARY_MODEL` is not downloaded in Ollama, gateway automatically falls back to `OLLAMA_MODEL` for that request.
 - if `OPENAI_API_KEY` is empty, proxy model calls return provider error.
-- `OPENAI_BASE_URL` may be either API base (`https://api.openai.com/v1`) or full chat-completions URL.
+- `OPENAI_BASE_URL` may be either API base (`https://openrouter.ai/api/v1`) or full chat-completions URL.
 - admin role is assigned by email list in `GATEWAY_ADMIN_EMAILS`.
+
+### Install second Ollama model locally
+
+If you see:
+
+`model 'llama3.2:3b' not found (status code: 404)`
+
+download the model in your local Ollama:
+
+```bash
+ollama pull llama3.2:3b
+ollama list
+```
+
+If Ollama runs on Windows host and API runs in Docker (WSL), run `ollama pull ...` on the host where Ollama daemon is running.
+
+### OpenRouter external model setup (based on your PHP sample)
+
+Use these `.env` values:
+
+```env
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-...your-key...
+OPENROUTER_SITE_URL=https://your-site.example
+OPENROUTER_APP_NAME=ai-servise
+```
+
+Then update model target in admin API (example for `deepseek/deepseek-chat`):
+
+```bash
+curl -X PATCH "http://127.0.0.1:8080/gateway/admin/models/proxy/openai-gpt-4o-mini" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: asv_admin_key_here" \
+  -d '{"target_model":"deepseek/deepseek-chat","display_name":"DeepSeek Chat (OpenRouter)","provider":"openai","is_active":true}'
+```
+
+After this, requests to model_id `proxy/openai-gpt-4o-mini` will actually call OpenRouter model `deepseek/deepseek-chat`.
 
 ### Browser routes
 

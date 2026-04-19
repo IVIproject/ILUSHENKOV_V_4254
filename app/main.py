@@ -11,6 +11,7 @@ from sqlalchemy import desc, func, select
 from .db import Base, SessionLocal, engine
 from .gateway_services import (
     call_openai_proxy,
+    choose_available_ollama_model,
     compute_token_charge,
     estimate_messages_tokens,
     estimate_text_tokens,
@@ -223,6 +224,30 @@ def _resolve_model_for_request(db, model_id: str) -> GatewayModel:
 
 def _charge_for_model(total_tokens: int, model_row: GatewayModel) -> int:
     return compute_token_charge(total_tokens, _effective_model_price_per_1k(model_row))
+
+
+def _run_ollama_with_fallback(*, model_row: GatewayModel, prompt: str) -> tuple[str, str]:
+    upstream_model = model_row.target_model
+    try:
+        content = run_chat_mode(client=client, model=upstream_model, prompt=prompt)
+        return content, upstream_model
+    except Exception as exc:
+        message = str(exc)
+        # Common Ollama message for missing model: "model 'x' not found (status code: 404)"
+        missing_model = "not found" in message.lower() and "status code: 404" in message.lower()
+        if model_row.provider == "ollama" and missing_model:
+            fallback_model = settings.ollama_model.strip()
+            if fallback_model and fallback_model != upstream_model:
+                logger.warning(
+                    "ollama model missing, fallback to primary model",
+                    extra={
+                        "missing_model": upstream_model,
+                        "fallback_model": fallback_model,
+                    },
+                )
+                content = run_chat_mode(client=client, model=fallback_model, prompt=prompt)
+                return content, fallback_model
+        raise
 
 
 def _get_gateway_user(gateway_key: str | None = Header(default=None, alias="X-Gateway-Key")) -> GatewayUser:
@@ -941,7 +966,8 @@ def gateway_generate(payload: GatewayGenerateRequest, user: GatewayUser = Depend
 
         try:
             if provider == "ollama":
-                content = run_chat_mode(client=client, model=upstream_model, prompt=prompt)
+                content, used_upstream_model = _run_ollama_with_fallback(model_row=model_row, prompt=prompt)
+                upstream_model = used_upstream_model
                 prompt_tokens = estimate_messages_tokens(messages)
                 completion_tokens = estimate_text_tokens(content)
                 total_tokens = prompt_tokens + completion_tokens

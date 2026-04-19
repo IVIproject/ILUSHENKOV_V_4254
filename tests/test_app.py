@@ -18,7 +18,7 @@ from app.models import (
 
 class FakeClient:
     def list(self):
-        return {"models": [{"name": "qwen2.5:3b"}]}
+        return {"models": [{"name": "qwen2.5:3b"}, {"name": "llama3.2:3b"}]}
 
     def chat(self, model, messages, stream=False):
         text = messages[0]["content"]
@@ -331,6 +331,37 @@ def test_gateway_register_models_and_generate():
     assert "answer" in out
     assert out["provider"] == "ollama"
     assert out["tokens_spent"] > 0
+
+
+def test_gateway_secondary_ollama_model_falls_back_if_missing():
+    _clear_faq_table()
+    register = client.post(
+        "/gateway/register",
+        json={"email": "fallback-user@example.com", "password": "strong-pass-123"},
+    )
+    assert register.status_code == 200
+    headers = {"X-Gateway-Key": register.json()["api_key"]}
+
+    original_chat = main_module.client.chat
+
+    def fake_chat(model, messages, stream=False):
+        if model == "llama3.2:3b":
+            raise RuntimeError("model 'llama3.2:3b' not found (status code: 404)")
+        return {"message": {"content": f"fallback answer for: {messages[0]['content']}"}}
+
+    main_module.client.chat = fake_chat
+    try:
+        response = client.post(
+            "/gateway/generate",
+            headers=headers,
+            json={"model_id": "local/llama3.2-3b", "prompt": "test fallback", "max_tokens": 64},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["provider"] == "ollama"
+        assert "fallback answer" in payload["answer"]
+    finally:
+        main_module.client.chat = original_chat
 
 
 def test_gateway_login_me_and_usage():
