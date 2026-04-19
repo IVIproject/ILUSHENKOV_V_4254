@@ -1,6 +1,6 @@
 # Разработка локальной системы генерации текстового контента с применением искусственного интеллекта
 
-`ai-servise` — это API‑сервис на FastAPI для корпоративных сценариев с ИИ:
+`ai-servise` - это API‑сервис на FastAPI для корпоративных сценариев с ИИ:
 
 - чат-режим;
 - генерация доменных имен;
@@ -10,12 +10,12 @@
 
 ## 1. Технологический стек
 
-- **FastAPI** — API и Swagger (`/docs`);
-- **PostgreSQL** — хранение логов и FAQ-данных;
-- **Ollama** — локальные модели;
-- **OpenRouter** — внешняя модель через OpenAI-совместимый интерфейс;
-- **Nginx** — reverse proxy;
-- **Docker Compose** — запуск всего стека.
+- **FastAPI** - API и Swagger (`/docs`);
+- **PostgreSQL** - хранение логов и FAQ-данных;
+- **Ollama** - локальные модели;
+- **OpenRouter** - внешняя модель через OpenAI-совместимый интерфейс;
+- **Nginx** - reverse proxy;
+- **Docker Compose** - запуск всего стека.
 
 ---
 
@@ -23,20 +23,20 @@
 
 ### 2.1 Основные API-эндпоинты
 
-- `GET /health` — проверка состояния;
-- `POST /generate` — обычная генерация текста;
-- `POST /generate/stream` — потоковая генерация;
-- `POST /generate/domains` — генерация доменных имен;
-- `POST /mode/run` — унифицированный запуск режимов:
+- `GET /health` - проверка состояния;
+- `POST /generate` - обычная генерация текста;
+- `POST /generate/stream` - потоковая генерация;
+- `POST /generate/domains` - генерация доменных имен;
+- `POST /mode/run` - унифицированный запуск режимов:
   - `chat`
   - `domains`
   - `support_faq`
-- `POST /page-template/generate-file` — генерация PHP-файла из шаблона;
-- `POST /support/faq/import` — импорт FAQ;
-- `POST /support/dialogs/import` — импорт FAQ из диалогов;
-- `POST /support/faq/ask` — ответ по FAQ;
-- `GET /history` — история запросов;
-- `GET /stats` — статистика.
+- `POST /page-template/generate-file` - генерация PHP-файла из шаблона;
+- `POST /support/faq/import` - импорт FAQ;
+- `POST /support/dialogs/import` - импорт FAQ из диалогов;
+- `POST /support/faq/ask` - ответ по FAQ;
+- `GET /history` - история запросов;
+- `GET /stats` - статистика.
 
 ### 2.2 Gateway (кабинет и API-ключи)
 
@@ -120,13 +120,13 @@ OPENAI_API_KEY=sk-or-v1-...
 ## 5. Веб-маршруты кабинета
 
 - `/gateway` -> редирект на `/gateway/login`
-- `/gateway/register` — регистрация
-- `/gateway/login` — авторизация
-- `/gateway/profile` — профиль
-- `/gateway/models/page` — список моделей
-- `/gateway/model/{model_id}` — страница модели
-- `/gateway/history` — история
-- `/gateway/admin` — управление (для администратора)
+- `/gateway/register` - регистрация
+- `/gateway/login` - авторизация
+- `/gateway/profile` - профиль
+- `/gateway/models/page` - список моделей
+- `/gateway/model/{model_id}` - страница модели
+- `/gateway/history` - история
+- `/gateway/admin` - управление (для администратора)
 
 ---
 
