@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OPENAI_API_KEY", "OPENROUTER_API_KEY"),
     )
+    allow_external_in_internal_modes: bool = True
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
