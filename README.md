@@ -71,15 +71,13 @@ OLLAMA_MODEL=qwen2.5:3b
 OLLAMA_SECONDARY_MODEL=llama3.2:3b
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_API_KEY=sk-or-v1-...
-OPENROUTER_SITE_URL=https://your-site.example
-OPENROUTER_APP_NAME=ai-servise
 GATEWAY_ADMIN_EMAILS=admin@example.com,owner@example.com
 ```
 
 Notes:
 
 - `OLLAMA_MODEL` and `OLLAMA_SECONDARY_MODEL` are local Ollama models.
-- if `OLLAMA_SECONDARY_MODEL` is not downloaded in Ollama, gateway automatically falls back to `OLLAMA_MODEL` for that request.
+- no fallback is used for Ollama: if requested model is unavailable, gateway returns provider error.
 - if `OPENAI_API_KEY` is empty, proxy model calls return provider error.
 - `OPENAI_BASE_URL` may be either API base (`https://openrouter.ai/api/v1`) or full chat-completions URL.
 - admin role is assigned by email list in `GATEWAY_ADMIN_EMAILS`.
@@ -106,20 +104,13 @@ Use these `.env` values:
 ```env
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_API_KEY=sk-or-v1-...your-key...
-OPENROUTER_SITE_URL=https://your-site.example
-OPENROUTER_APP_NAME=ai-servise
 ```
 
-Then update model target in admin API (example for `deepseek/deepseek-chat`):
+Default external model in catalog is already:
 
-```bash
-curl -X PATCH "http://127.0.0.1:8080/gateway/admin/models/proxy/openai-gpt-4o-mini" \
-  -H "Content-Type: application/json" \
-  -H "X-Gateway-Key: asv_admin_key_here" \
-  -d '{"target_model":"deepseek/deepseek-chat","display_name":"DeepSeek Chat (OpenRouter)","provider":"openai","is_active":true}'
-```
+- `proxy/openrouter-deepseek-chat` -> `deepseek/deepseek-chat`
 
-After this, requests to model_id `proxy/openai-gpt-4o-mini` will actually call OpenRouter model `deepseek/deepseek-chat`.
+You only need to set `OPENAI_API_KEY` with your OpenRouter key.
 
 ### Browser routes
 
@@ -154,10 +145,10 @@ Local model:
 curl -X POST "http://127.0.0.1:8080/gateway/generate"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_your_key_here"   -d '{"model_id":"local/qwen2.5-3b","prompt":"Привет, коротко расскажи про VPS"}'
 ```
 
-Proxy model (OpenAI upstream):
+Proxy model (OpenRouter upstream):
 
 ```bash
-curl -X POST "http://127.0.0.1:8080/gateway/generate"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_your_key_here"   -d '{"model_id":"proxy/openai-gpt-4o-mini","prompt":"Сделай краткий план запуска сайта"}'
+curl -X POST "http://127.0.0.1:8080/gateway/generate"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_your_key_here"   -d '{"model_id":"proxy/openrouter-deepseek-chat","prompt":"Сделай краткий план запуска сайта"}'
 ```
 
 ### Admin API examples

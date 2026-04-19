@@ -36,13 +36,6 @@ def get_gateway_models() -> list[GatewayModelDef]:
             cost_per_1k_tokens=1,
         ),
         GatewayModelDef(
-            model_id="proxy/openai-gpt-4o-mini",
-            provider="openai",
-            label="OpenAI GPT-4o-mini (proxy)",
-            upstream_model="gpt-4o-mini",
-            cost_per_1k_tokens=8,
-        ),
-        GatewayModelDef(
             model_id="proxy/openrouter-deepseek-chat",
             provider="openai",
             label="OpenRouter DeepSeek Chat (proxy)",
@@ -50,22 +43,6 @@ def get_gateway_models() -> list[GatewayModelDef]:
             cost_per_1k_tokens=8,
         ),
     ]
-
-
-def choose_available_ollama_model(
-    *,
-    target_model: str,
-    fallback_model: str,
-    available_models: list[str],
-) -> str:
-    available = {item.strip().lower() for item in available_models if item and item.strip()}
-    normalized_target = target_model.strip().lower()
-    normalized_fallback = fallback_model.strip().lower()
-    if normalized_target in available:
-        return target_model
-    if normalized_fallback in available:
-        return fallback_model
-    return target_model
 
 
 def resolve_gateway_model(model_name: str) -> GatewayModelDef | None:
@@ -162,16 +139,6 @@ def call_openai_proxy(
         headers={
             "Authorization": f"Bearer {settings.openai_api_key}",
             "Content-Type": "application/json",
-            **(
-                {"HTTP-Referer": settings.openrouter_site_url.strip()}
-                if settings.openrouter_site_url and settings.openrouter_site_url.strip()
-                else {}
-            ),
-            **(
-                {"X-Title": settings.openrouter_app_name.strip()}
-                if settings.openrouter_app_name and settings.openrouter_app_name.strip()
-                else {}
-            ),
         },
         method="POST",
     )

@@ -319,7 +319,7 @@ def test_gateway_register_models_and_generate():
     model_ids = [m["model_id"] for m in models_resp.json()["models"]]
     assert "local/qwen2.5-3b" in model_ids
     assert "local/llama3.2-3b" in model_ids
-    assert "proxy/openai-gpt-4o-mini" in model_ids
+    assert "proxy/openrouter-deepseek-chat" in model_ids
 
     generate = client.post(
         "/gateway/generate",
@@ -333,7 +333,7 @@ def test_gateway_register_models_and_generate():
     assert out["tokens_spent"] > 0
 
 
-def test_gateway_secondary_ollama_model_falls_back_if_missing():
+def test_gateway_secondary_ollama_model_returns_error_if_missing():
     _clear_faq_table()
     register = client.post(
         "/gateway/register",
@@ -347,19 +347,17 @@ def test_gateway_secondary_ollama_model_falls_back_if_missing():
     def fake_chat(model, messages, stream=False):
         if model == "llama3.2:3b":
             raise RuntimeError("model 'llama3.2:3b' not found (status code: 404)")
-        return {"message": {"content": f"fallback answer for: {messages[0]['content']}"}}
+        return {"message": {"content": f"answer for: {messages[0]['content']}"}}
 
     main_module.client.chat = fake_chat
     try:
         response = client.post(
             "/gateway/generate",
             headers=headers,
-            json={"model_id": "local/llama3.2-3b", "prompt": "test fallback", "max_tokens": 64},
+            json={"model_id": "local/llama3.2-3b", "prompt": "test no fallback", "max_tokens": 64},
         )
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["provider"] == "ollama"
-        assert "fallback answer" in payload["answer"]
+        assert response.status_code == 502
+        assert "llama3.2:3b" in response.json()["detail"]
     finally:
         main_module.client.chat = original_chat
 
@@ -566,7 +564,7 @@ def test_gateway_provider_requires_configured_key():
         r = client.post(
             "/gateway/generate",
             headers=headers,
-            json={"model_id": "proxy/openai-gpt-4o-mini", "prompt": "Привет", "max_tokens": 80},
+            json={"model_id": "proxy/openrouter-deepseek-chat", "prompt": "Привет", "max_tokens": 80},
         )
         assert r.status_code == 502
     finally:
