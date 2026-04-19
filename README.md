@@ -1,435 +1,289 @@
 # ai-servise
 
-Local API service for text generation using FastAPI + Ollama + PostgreSQL.
+`ai-servise` — это API‑сервис на FastAPI для корпоративных сценариев с ИИ:
 
-## Project readiness level
+- чат-режим;
+- генерация доменных имен;
+- генерация PHP-страницы по шаблону (с выдачей файла);
+- FAQ-ассистент по базе вопросов/ответов;
+- gateway-кабинет с локальными и внешними моделями.
 
-The service already includes:
+## 1. Технологический стек
 
-- API layer (FastAPI) with OpenAPI docs
-- local LLM integration via Ollama
-- PostgreSQL logging of requests/responses
-- streaming generation endpoint
-- migration support via Alembic
-- Docker stack (api + postgres + nginx)
-- tests for core endpoints
+- **FastAPI** — API и Swagger (`/docs`);
+- **PostgreSQL** — хранение логов и FAQ-данных;
+- **Ollama** — локальные модели;
+- **OpenRouter** — внешняя модель через OpenAI-совместимый интерфейс;
+- **Nginx** — reverse proxy;
+- **Docker Compose** — запуск всего стека.
 
-## Prerequisites
+---
 
-- Docker + Docker Compose
-- Running Ollama server with a downloaded model (local or remote)
+## 2. Что умеет проект
 
-## Quick start (Docker: API + Postgres + Nginx)
+### 2.1 Основные API-эндпоинты
 
-1. Prepare environment file:
+- `GET /health` — проверка состояния;
+- `POST /generate` — обычная генерация текста;
+- `POST /generate/stream` — потоковая генерация;
+- `POST /generate/domains` — генерация доменных имен;
+- `POST /mode/run` — унифицированный запуск режимов:
+  - `chat`
+  - `domains`
+  - `support_faq`
+- `POST /page-template/generate-file` — генерация PHP-файла из шаблона;
+- `POST /support/faq/import` — импорт FAQ;
+- `POST /support/dialogs/import` — импорт FAQ из диалогов;
+- `POST /support/faq/ask` — ответ по FAQ;
+- `GET /history` — история запросов;
+- `GET /stats` — статистика.
+
+### 2.2 Gateway (кабинет и API-ключи)
+
+- регистрация и логин пользователей;
+- выдача `X-Gateway-Key`;
+- каталог моделей (локальные + внешние);
+- генерация через `/gateway/generate`;
+- история использования;
+- админ-панель `/gateway/admin`:
+  - пользователи;
+  - модели.
+
+### 2.3 OpenAI-совместимый интерфейс
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+Авторизация: `Authorization: Bearer <X-Gateway-Key>`.
+
+---
+
+## 3. Быстрый старт (Docker)
+
+### 3.1 Подготовка
 
 ```bash
 cp .env.example .env
 ```
 
-2. Start stack:
+Минимально проверьте в `.env`:
+
+```env
+OLLAMA_HOST=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_SECONDARY_MODEL=llama3.2:3b
+
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-...
+
+GATEWAY_ADMIN_EMAILS=admin@example.com
+```
+
+### 3.2 Запуск
 
 ```bash
 docker compose up -d --build
-```
-
-3. Check containers:
-
-```bash
 docker compose ps
 ```
 
-API is available through Nginx at:
+После запуска:
 
-- `http://127.0.0.1:8080`
+- API: `http://127.0.0.1:8080`
 - Swagger: `http://127.0.0.1:8080/docs`
 
-## API checks
-
-- Health check:
+Проверка:
 
 ```bash
 curl http://127.0.0.1:8080/health
 ```
 
-## OpenRouter-like gateway (cabinet + admin)
+---
 
-Current gateway capabilities:
+## 4. Настройка моделей
 
-- user registration and login with API key issuance
-- model catalog with local and external provider routing
-- OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`)
-- separate pages with unified navigation menu
-- role-based admin access by email list (`GATEWAY_ADMIN_EMAILS`)
+## 4.1 Локальные модели Ollama
 
-### Gateway setup
-
-Add variables to `.env`:
-
-```env
-OLLAMA_MODEL=qwen2.5:3b
-OLLAMA_SECONDARY_MODEL=llama3.2:3b
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
-OPENAI_API_KEY=sk-or-v1-...
-GATEWAY_ADMIN_EMAILS=admin@example.com,owner@example.com
-```
-
-Notes:
-
-- `OLLAMA_MODEL` and `OLLAMA_SECONDARY_MODEL` are local Ollama models.
-- no fallback is used for Ollama: if requested model is unavailable, gateway returns provider error.
-- if `OPENAI_API_KEY` is empty, proxy model calls return provider error.
-- `OPENAI_BASE_URL` may be either API base (`https://openrouter.ai/api/v1`) or full chat-completions URL.
-- admin role is assigned by email list in `GATEWAY_ADMIN_EMAILS`.
-
-### Install second Ollama model locally
-
-If you see:
-
-`model 'llama3.2:3b' not found (status code: 404)`
-
-download the model in your local Ollama:
+Убедитесь, что установлены:
 
 ```bash
-ollama pull llama3.2:3b
 ollama list
 ```
 
-If Ollama runs on Windows host and API runs in Docker (WSL), run `ollama pull ...` on the host where Ollama daemon is running.
+Нужны:
 
-### OpenRouter external model setup (based on your PHP sample)
+- `qwen2.5:3b`
+- `llama3.2:3b`
 
-Use these `.env` values:
+Если отсутствуют:
 
-```env
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
-OPENAI_API_KEY=sk-or-v1-...your-key...
+```bash
+ollama pull qwen2.5:3b
+ollama pull llama3.2:3b
 ```
 
-Default external model in catalog is already:
+> Важно: pull нужно выполнять там, где реально запущен Ollama daemon.
+
+### 4.2 Внешняя модель (OpenRouter)
+
+В проекте уже преднастроена модель:
 
 - `proxy/openrouter-deepseek-chat` -> `deepseek/deepseek-chat`
 
-You only need to set `OPENAI_API_KEY` with your OpenRouter key.
+Нужно только задать валидный:
 
-### Browser routes
-
-- `http://127.0.0.1:8080/gateway` -> auto-redirect to `/gateway/login`
-- `http://127.0.0.1:8080/gateway/register` -> registration page
-- `http://127.0.0.1:8080/gateway/login` -> login page
-- `http://127.0.0.1:8080/gateway/profile` -> user profile page
-- `http://127.0.0.1:8080/gateway/models/page` -> models list
-- `http://127.0.0.1:8080/gateway/model/{model_id}` -> model details + request form
-- `http://127.0.0.1:8080/gateway/history` -> request history
-- `http://127.0.0.1:8080/gateway/admin` -> unified admin section (users + models on one page)
-
-All pages use a shared menu. For admin users, menu includes `Управление`.
-
-### Register user and get API key (API example)
-
-```bash
-curl -X POST "http://127.0.0.1:8080/gateway/register"   -H "Content-Type: application/json"   -d '{"email":"user@example.com","password":"strong-pass-123"}'
+```env
+OPENAI_API_KEY=sk-or-v1-...
 ```
 
-List models:
+---
+
+## 5. Веб-маршруты кабинета
+
+- `/gateway` -> редирект на `/gateway/login`
+- `/gateway/register` — регистрация
+- `/gateway/login` — авторизация
+- `/gateway/profile` — профиль
+- `/gateway/models/page` — список моделей
+- `/gateway/model/{model_id}` — страница модели
+- `/gateway/history` — история
+- `/gateway/admin` — управление (для администратора)
+
+---
+
+## 6. Примеры API-запросов
+
+### 6.1 Регистрация gateway-пользователя
 
 ```bash
-curl -X GET "http://127.0.0.1:8080/gateway/models"   -H "X-Gateway-Key: asv_your_key_here"
-```
-
-### Gateway inference
-
-Local model:
-
-```bash
-curl -X POST "http://127.0.0.1:8080/gateway/generate"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_your_key_here"   -d '{"model_id":"local/qwen2.5-3b","prompt":"Привет, коротко расскажи про VPS"}'
-```
-
-Proxy model (OpenRouter upstream):
-
-```bash
-curl -X POST "http://127.0.0.1:8080/gateway/generate"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_your_key_here"   -d '{"model_id":"proxy/openrouter-deepseek-chat","prompt":"Сделай краткий план запуска сайта"}'
-```
-
-### Admin API examples
-
-List users:
-
-```bash
-curl -X GET "http://127.0.0.1:8080/gateway/admin/users?limit=50"   -H "X-Gateway-Key: asv_admin_key_here"
-```
-
-Update user role/activity:
-
-```bash
-curl -X PATCH "http://127.0.0.1:8080/gateway/admin/users/5"   -H "Content-Type: application/json"   -H "X-Gateway-Key: asv_admin_key_here"   -d '{"role":"admin","is_active":true}'
-```
-
-Delete user:
-
-```bash
-curl -X DELETE "http://127.0.0.1:8080/gateway/admin/users/5"   -H "X-Gateway-Key: asv_admin_key_here"
-```
-
-### OpenAI-compatible endpoints
-
-These endpoints allow using standard OpenAI SDK format directly:
-
-- `GET /v1/models`
-- `POST /v1/chat/completions`
-
-Use gateway API key in `Authorization: Bearer ...`
-
-```bash
-curl -X GET "http://127.0.0.1:8080/v1/models"   -H "Authorization: Bearer asv_your_key_here"
-```
-
-```bash
-curl -X POST "http://127.0.0.1:8080/v1/chat/completions"   -H "Content-Type: application/json"   -H "Authorization: Bearer asv_your_key_here"   -d '{
-        "model":"local/qwen2.5-3b",
-        "messages":[{"role":"user","content":"Привет, коротко расскажи про VPS"}],
-        "max_tokens": 256
-      }'
-```
-
-## 3 working modes (single endpoint)
-
-Unified endpoint:
-
-```bash
-POST /mode/run
-```
-
-Supported modes:
-
-1. `chat` - standard assistant response
-2. `domains` - domain list generation without numbering/comments
-3. `support_faq` - support response using imported FAQ history
-
-Mode examples:
-
-```bash
-# 1) chat
-curl -X POST "http://127.0.0.1:8080/mode/run" \
+curl -X POST "http://127.0.0.1:8080/gateway/register" \
   -H "Content-Type: application/json" \
-  -d '{"mode":"chat","payload":{"prompt":"Коротко опиши услугу VPS-хостинга"}}'
-
-# 2) domains
-curl -X POST "http://127.0.0.1:8080/mode/run" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"domains","payload":{"business_context":"регистрация доменов и хостинг","keywords":["domain","cloud"],"zone":".ru","count":5}}'
-
-# 3) support_faq
-curl -X POST "http://127.0.0.1:8080/mode/run" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"support_faq","payload":{"question":"Как продлить домен?","max_context_items":5}}'
+  -d '{"email":"user@example.com","password":"strong-pass-123"}'
 ```
 
-### PHP page generation (file output only)
+### 6.2 Получить список моделей
 
-`php_page` mode is intentionally disabled in `/mode/run`.
-Use the dedicated endpoint below to generate and download a `.php` file from a named template:
+```bash
+curl -X GET "http://127.0.0.1:8080/gateway/models" \
+  -H "X-Gateway-Key: asv_...your_key..."
+```
+
+### 6.3 Генерация через локальную модель
+
+```bash
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: asv_...your_key..." \
+  -d '{"model_id":"local/qwen2.5-3b","prompt":"Кратко опиши услугу VPS"}'
+```
+
+### 6.4 Генерация через OpenRouter
+
+```bash
+curl -X POST "http://127.0.0.1:8080/gateway/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Gateway-Key: asv_...your_key..." \
+  -d '{"model_id":"proxy/openrouter-deepseek-chat","prompt":"Сделай план запуска проекта"}'
+```
+
+### 6.5 Генерация PHP-файла из шаблона
 
 ```bash
 curl -X POST "http://127.0.0.1:8080/page-template/generate-file" \
   -H "Content-Type: application/json" \
-  -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст страницы хостинга","output_filename":"hosting-generated.php"}' \
+  -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст для страницы хостинга","output_filename":"hosting-generated.php"}' \
   --output hosting-generated.php
 ```
 
-### FAQ import examples
+---
 
-If `ADMIN_API_KEY` is configured in `.env`, include the header `X-API-Key`.
+## 7. `ADMIN_API_KEY` и админ-доступ
 
-```bash
-# structured FAQ import
-curl -X POST "http://127.0.0.1:8080/support/faq/import" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-admin-key" \
-  -d '{"items":[{"question":"Как продлить домен?","answer":"Продление доступно в личном кабинете.","source":"support_chat"}]}'
+### 7.1 `ADMIN_API_KEY`
 
-# import from support transcript text
-curl -X POST "http://127.0.0.1:8080/support/dialogs/import" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-admin-key" \
-  -d '{"transcript":"Q: Как продлить домен?\nA: Через личный кабинет."}'
-```
-
-### How `ADMIN_API_KEY` works (simple)
-
-`ADMIN_API_KEY` protects only admin-like import endpoints:
+Используется только для:
 
 - `POST /support/faq/import`
 - `POST /support/dialogs/import`
 
-If `ADMIN_API_KEY` is empty in `.env`, these endpoints work **without** a key.
-
-If `ADMIN_API_KEY` is set, each import request must include:
+Если ключ задан в `.env`, нужно передавать:
 
 ```http
-X-API-Key: <your key from .env>
+X-API-Key: <ваш ADMIN_API_KEY>
 ```
 
-Quick setup:
+### 7.2 Админ в gateway
 
-1. Open `.env` and set:
-
-```env
-ADMIN_API_KEY=my-secret-key-123
-```
-
-2. Restart API:
-
-```bash
-docker compose up -d --build
-```
-
-3. Use key in request:
-
-```bash
-curl -X POST "http://127.0.0.1:8080/support/faq/import" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: my-secret-key-123" \
-  -d '{"items":[{"question":"Как продлить домен?","answer":"Через личный кабинет.","source":"support_chat"}]}'
-```
-
-Without key (or with wrong key) API returns `401`.
-
-### How admin access works now
-
-Gateway admin endpoints now use **user role**, not a separate header key.
-
-Admin role source:
-
-- set admin emails in `.env`:
+Права администратора в gateway назначаются по email:
 
 ```env
 GATEWAY_ADMIN_EMAILS=admin@example.com,owner@example.com
 ```
 
-- any account with email from that list becomes admin (on register/login).
+Если пользователь входит с таким email, он становится администратором и может работать с `/gateway/admin`.
 
-To call admin endpoints use normal gateway user header with an admin user's key:
+---
 
-```http
-X-Gateway-Key: <admin-user-api-key>
-```
+## 8. Тестирование
 
-- Generic text generation:
+### 8.1 Автотесты
 
 ```bash
-curl -X POST "http://127.0.0.1:8080/generate" \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Suggest 3 domain names for an IT service"}'
+python3 -m pytest -q
 ```
 
-- Domain names generation (business endpoint):
+### 8.2 Бенчмарк базового API
 
 ```bash
-curl -X POST "http://127.0.0.1:8080/generate/domains" \
-  -H "Content-Type: application/json" \
-  -d '{"business_context":"cloud hosting and VPS","keywords":["cloud","vps"],"zone":".ru","count":7}'
+python3 scripts/benchmark_api.py \
+  --url http://127.0.0.1:8080/generate \
+  --requests 20 \
+  --warmup 3 \
+  --out docs/results/benchmark-generate.json
 ```
 
-- Stream generation (NDJSON):
+### 8.3 Бенчмарк gateway по 3 моделям (для отчета)
 
 ```bash
-curl -N -X POST "http://127.0.0.1:8080/generate/stream" \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Write a short greeting"}'
+python3 scripts/benchmark_gateway_models.py \
+  --base-url http://127.0.0.1:8080 \
+  --email benchmark.user@example.com \
+  --password strong-pass-123 \
+  --models "local/qwen2.5-3b,local/llama3.2-3b,proxy/openrouter-deepseek-chat" \
+  --requests 20 \
+  --warmup 3 \
+  --max-tokens 180 \
+  --out docs/results/benchmark-gateway-3models.json
 ```
 
-- Request history:
+Файл отчета будет содержать:
 
-```bash
-curl "http://127.0.0.1:8080/history?limit=5"
-```
+- коды ответов;
+- success rate;
+- latency (min/avg/median/p95/p99/max);
+- средний размер ответа;
+- средние токены prompt/completion/total;
+- ошибки (если есть).
 
-- Service usage stats:
+---
 
-```bash
-curl "http://127.0.0.1:8080/stats"
-```
-
-`/stats` now also includes FAQ quality metrics:
-
-- `support_faq_total_requests` - number of support FAQ requests evaluated
-- `support_faq_zero_match_total` - count of requests with zero overlap to FAQ context
-- `support_faq_no_match_rate` - share of requests with zero overlap to FAQ context
-- `support_faq_avg_relevance_score` - average overlap score (higher is better)
-- `support_faq_top_questions` - most frequent normalized support questions
-
-## Migrations (Alembic)
-
-From local virtual environment:
-
-```bash
-alembic upgrade head
-```
-
-Create new migration:
-
-```bash
-alembic revision -m "describe_change"
-```
-
-## Makefile shortcuts
+## 9. Полезные команды Makefile
 
 ```bash
 make up
 make ps
+make health
 make test
+make benchmark
 make logs
 make down
 ```
 
-## Optional ML dependencies
+---
 
-The API does not require `torch` / `transformers` for basic Ollama proxy mode.
-If you want local model experimentation with Hugging Face stack, install separately:
+## 10. Документация проекта
 
-```bash
-pip install -r requirements-ml.txt
-```
+- Архитектура: `docs/architecture.md`
+- Сценарий демонстрации: `docs/defense-scenario.md`
+- Методика экспериментов: `docs/experiment-methodology.md`
+- Чек-лист для отчета и защиты: `docs/report-checklist-ru.md`
 
-## Local development (without API container)
-
-If you want to run only PostgreSQL in Docker and run API from venv:
-
-```bash
-docker compose up -d postgres
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-## Documentation for report and defense
-
-- architecture description: `docs/architecture.md`
-- demonstration script: `docs/defense-scenario.md`
-- experiment methodology: `docs/experiment-methodology.md`
-
-## Experimental part (for report)
-
-Run quick API benchmark and save measurable metrics:
-
-```bash
-make benchmark
-```
-
-This command creates JSON report:
-
-- `docs/results/benchmark-generate.json`
-
-You can include these values directly into report tables (latency avg/p95/p99, status code distribution, payload size).
-
-Example for domain generation scenario:
-
-```bash
-python3 scripts/benchmark_api.py \
-  --url http://127.0.0.1:8080/generate/domains \
-  --requests 20 \
-  --warmup 3 \
-  --out docs/results/benchmark-domains.json
-```
