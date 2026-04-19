@@ -162,25 +162,52 @@ def _model_item_from_row(row: GatewayModel) -> GatewayModelItem:
 
 
 def _ensure_catalog_seeded(db) -> None:
-    existing = db.query(GatewayModel.id).limit(1).first()
-    if existing:
-        return
-    for model in get_gateway_models():
-        db.add(
-            GatewayModel(
-                model_key=model.model_id,
-                display_name=model.label,
-                provider=model.provider,
-                target_model=model.upstream_model,
-                price_per_1k_tokens=float(model.cost_per_1k_tokens),
-                external_price_per_1k_tokens=(
-                    float(model.cost_per_1k_tokens) if model.provider == "openai" else None
-                ),
-                markup_percent=15.0 if model.provider == "openai" else 0.0,
-                is_active=True,
+    configured_models = get_gateway_models()
+    rows = db.query(GatewayModel).all()
+    rows_by_key = {row.model_key.strip().lower(): row for row in rows}
+    changed = False
+
+    # Remove deprecated external model from older catalogs.
+    legacy_key = "proxy/openai-gpt-4o-mini"
+    legacy_row = rows_by_key.get(legacy_key)
+    if legacy_row is not None:
+        db.delete(legacy_row)
+        changed = True
+
+    for model in configured_models:
+        key = model.model_id.strip().lower()
+        existing = rows_by_key.get(key)
+        if existing is None:
+            db.add(
+                GatewayModel(
+                    model_key=model.model_id,
+                    display_name=model.label,
+                    provider=model.provider,
+                    target_model=model.upstream_model,
+                    price_per_1k_tokens=float(model.cost_per_1k_tokens),
+                    external_price_per_1k_tokens=(
+                        float(model.cost_per_1k_tokens) if model.provider == "openai" else None
+                    ),
+                    markup_percent=15.0 if model.provider == "openai" else 0.0,
+                    is_active=True,
+                )
             )
-        )
-    db.commit()
+            changed = True
+            continue
+
+        # Keep admin pricing edits, but align identity fields with code defaults.
+        if (
+            existing.display_name != model.label
+            or existing.provider != model.provider
+            or existing.target_model != model.upstream_model
+        ):
+            existing.display_name = model.label
+            existing.provider = model.provider
+            existing.target_model = model.upstream_model
+            changed = True
+
+    if changed:
+        db.commit()
 
 
 def _resolve_model_for_request(db, model_id: str) -> GatewayModel:
