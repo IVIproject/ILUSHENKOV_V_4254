@@ -22,9 +22,6 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OPENAI_API_KEY", "OPENROUTER_API_KEY"),
     )
-    openrouter_site_url: str | None = None
-    openrouter_app_name: str | None = None
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
