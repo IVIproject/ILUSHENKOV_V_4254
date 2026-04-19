@@ -3,6 +3,7 @@ os.environ["DATABASE_URL"] = "sqlite:////tmp/ai_servise_test.db"
 os.environ["OLLAMA_HOST"] = "http://fake-ollama"
 os.environ["OLLAMA_MODEL"] = "qwen2.5:3b"
 os.environ["LOG_LEVEL"] = "INFO"
+os.environ["ADMIN_API_KEY"] = ""
 os.environ["GATEWAY_PROVIDER_API_KEY"] = "test-provider-key"
 
 from fastapi.testclient import TestClient
