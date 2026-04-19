@@ -114,6 +114,23 @@ def test_generate_domains():
     assert all(item.endswith(".ru") for item in data["suggestions"])
 
 
+def test_generate_domains_with_model_id():
+    r = client.post(
+        "/generate/domains",
+        json={
+            "business_context": "My Hosting Service",
+            "keywords": ["cloud", "fast", "secure"],
+            "zone": ".ru",
+            "count": 3,
+            "model_id": "local/llama3.2-3b",
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["suggestions"]) == 3
+    assert all(item.endswith(".ru") for item in data["suggestions"])
+
+
 def test_stats():
     client.post("/generate", json={"prompt": "stats seed"})
     r = client.get("/stats")
@@ -139,6 +156,18 @@ def test_mode_chat():
     assert isinstance(data["result"]["text"], str)
 
 
+def test_mode_chat_with_model_id():
+    r = client.post(
+        "/mode/run",
+        json={"mode": "chat", "model_id": "local/llama3.2-3b", "payload": {"prompt": "Привет!"}},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["mode"] == "chat"
+    assert data["result"]["model_id"] == "local/llama3.2-3b"
+    assert isinstance(data["result"]["text"], str)
+
+
 def test_mode_domains_list():
     r = client.post(
         "/mode/run",
@@ -156,6 +185,25 @@ def test_mode_domains_list():
     assert len(out) == 3
     assert all(x.endswith(".ru") for x in out)
     assert all(" " not in x for x in out)
+
+
+def test_mode_domains_with_model_id():
+    r = client.post(
+        "/mode/run",
+        json={
+            "mode": "domains",
+            "model_id": "local/llama3.2-3b",
+            "payload": {
+                "business_context": "Сервис регистрации доменов",
+                "zone": ".ru",
+                "count": 3,
+            },
+        },
+    )
+    assert r.status_code == 200
+    payload = r.json()["result"]
+    assert payload["model_id"] == "local/llama3.2-3b"
+    assert len(payload["suggestions"]) == 3
 
 
 def test_mode_php_page_removed_from_mode_runner():
@@ -210,6 +258,89 @@ def test_faq_import_and_support_mode():
     data = r_mode.json()
     assert data["mode"] == "support_faq"
     assert "личном кабинете" in data["result"]["answer"]
+
+
+def test_support_faq_ask_with_model_metrics():
+    _clear_faq_table()
+    items = [
+        {
+            "question": "Как продлить домен?",
+            "answer": "Продлить домен можно в личном кабинете.",
+            "source": "support_chat",
+        }
+    ]
+    r_import = client.post("/support/faq/import", json={"items": items})
+    assert r_import.status_code == 200
+
+    r = client.post(
+        "/support/faq/ask",
+        json={
+            "question": "Как продлить домен?",
+            "max_context_items": 3,
+            "model_id": "local/llama3.2-3b",
+        },
+    )
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["model_id"] == "local/llama3.2-3b"
+    assert payload["provider"] == "ollama"
+    assert payload["matched_items"] >= 1
+    assert payload["relevance_max"] >= 0.0
+
+
+def test_support_faq_ask_rejects_external_model_by_default():
+    r = client.post(
+        "/support/faq/ask",
+        json={
+            "question": "Как продлить домен?",
+            "model_id": "proxy/openrouter-deepseek-chat",
+        },
+    )
+    assert r.status_code == 400
+    assert "restricted to local models" in r.json()["detail"]
+
+
+def test_page_template_generate_file_with_model_id():
+    r = client.post(
+        "/page-template/generate-file",
+        json={
+            "template_name": "hosting",
+            "content_prompt": "Сделай текст лендинга хостинга",
+            "output_filename": "generated-hosting.php",
+            "model_id": "local/llama3.2-3b",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-httpd-php")
+    assert "<?" in r.text
+
+
+def test_internal_modes_reject_external_model_by_default():
+    r = client.post(
+        "/mode/run",
+        json={
+            "mode": "chat",
+            "model_id": "proxy/openrouter-deepseek-chat",
+            "payload": {"prompt": "Привет!"},
+        },
+    )
+    assert r.status_code == 400
+    assert "restricted to local models" in r.json()["detail"]
+
+
+def test_generate_domains_rejects_external_model_by_default():
+    r = client.post(
+        "/generate/domains",
+        json={
+            "business_context": "My Hosting Service",
+            "keywords": ["cloud"],
+            "zone": ".ru",
+            "count": 3,
+            "model_id": "proxy/openrouter-deepseek-chat",
+        },
+    )
+    assert r.status_code == 400
+    assert "restricted to local models" in r.json()["detail"]
 
 
 def test_support_dialog_import():

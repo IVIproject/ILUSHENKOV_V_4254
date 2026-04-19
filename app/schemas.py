@@ -31,12 +31,15 @@ class DomainSuggestionsRequest(BaseModel):
     keywords: list[str] = Field(default_factory=list, max_length=10)
     zone: str = Field(default=".ru", min_length=2, max_length=10)
     count: int = Field(default=10, ge=1, le=20)
+    model_id: str | None = Field(default=None, min_length=3, max_length=128)
 
 
 class DomainSuggestionsResponse(BaseModel):
     business_context: str
     zone: str
     suggestions: list[str]
+    model_id: str | None = None
+    provider: str | None = None
 
 
 class PhpTemplateRequest(BaseModel):
@@ -70,16 +73,23 @@ class SupportDialogsImportResponse(BaseModel):
 class SupportFaqAskRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=2000)
     max_context_items: int = Field(default=5, ge=1, le=20)
+    model_id: str | None = Field(default=None, min_length=3, max_length=128)
 
 
 class SupportFaqAskResponse(BaseModel):
     answer: str
     matched_items: int
+    relevance_avg: float = 0.0
+    relevance_max: float = 0.0
+    zero_match: bool = False
+    model_id: str | None = None
+    provider: str | None = None
 
 
 class ModeRunRequest(BaseModel):
     mode: str = Field(..., description="chat | domains | support_faq")
     payload: dict = Field(default_factory=dict)
+    model_id: str | None = Field(default=None, min_length=3, max_length=128)
 
 
 class ModeRunResponse(BaseModel):
@@ -91,6 +101,7 @@ class PageTemplateGenerateRequest(BaseModel):
     template_name: str = Field(..., min_length=3, max_length=200)
     content_prompt: str = Field(..., min_length=5, max_length=3000)
     output_filename: str = Field(default="generated-page.php", min_length=5, max_length=200)
+    model_id: str | None = Field(default=None, min_length=3, max_length=128)
 
 
 class SupportDialogsImportRequest(BaseModel):

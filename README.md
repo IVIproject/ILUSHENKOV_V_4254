@@ -77,6 +77,7 @@ OPENAI_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_API_KEY=sk-or-v1-...
 
 GATEWAY_ADMIN_EMAILS=admin@example.com
+ALLOW_EXTERNAL_IN_INTERNAL_MODES=false
 ```
 
 ### 3.2 Запуск
@@ -190,8 +191,44 @@ curl -X POST "http://127.0.0.1:8080/gateway/generate" \
 ```bash
 curl -X POST "http://127.0.0.1:8080/page-template/generate-file" \
   -H "Content-Type: application/json" \
-  -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст для страницы хостинга","output_filename":"hosting-generated.php"}' \
+  -d '{"template_name":"hosting.php","content_prompt":"Сделай продающий текст для страницы хостинга","output_filename":"hosting-generated.php","model_id":"local/llama3.2-3b"}' \
   --output hosting-generated.php
+```
+
+### 6.6 Выбор модели для каждого режима
+
+Теперь в режимах можно явно передавать `model_id`:
+
+- `POST /mode/run` -> поле верхнего уровня `model_id`
+- `POST /generate/domains` -> `model_id`
+- `POST /support/faq/ask` -> `model_id`
+- `POST /page-template/generate-file` -> `model_id`
+
+Пример (`mode/run` + domains):
+
+```bash
+curl -X POST "http://127.0.0.1:8080/mode/run" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "mode":"domains",
+        "model_id":"local/llama3.2-3b",
+        "payload":{"business_context":"хостинг и домены","zone":".ru","count":5}
+      }'
+```
+
+Ограничение безопасности по умолчанию:
+
+- внутренние режимы (`chat/domains/support_faq/php template`) используют **только локальные модели**;
+- внешние модели для них запрещены, если:
+
+```env
+ALLOW_EXTERNAL_IN_INTERNAL_MODES=false
+```
+
+Если нужно временно разрешить внешний провайдер для внутренних режимов, включите:
+
+```env
+ALLOW_EXTERNAL_IN_INTERNAL_MODES=true
 ```
 
 ---
@@ -264,6 +301,39 @@ python3 scripts/benchmark_gateway_models.py \
 - средние токены prompt/completion/total;
 - ошибки (если есть).
 
+### 8.4 Бенчмарк качества по режимам и моделям
+
+Скрипт сравнивает, как модели справляются с задачами в разных режимах:
+
+- `chat`
+- `domains`
+- `support_faq`
+- `php_template_file`
+
+```bash
+python3 scripts/benchmark_modes_quality.py \
+  --base-url http://127.0.0.1:8080 \
+  --email quality.benchmark@example.com \
+  --password strong-pass-123 \
+  --models "local/qwen2.5-3b,local/llama3.2-3b" \
+  --requests 10 \
+  --warmup 2 \
+  --out docs/results/benchmark-modes-quality.json
+```
+
+Если включен `ADMIN_API_KEY`, добавьте:
+
+```bash
+  --admin-api-key your-admin-key
+```
+
+Качество в отчете:
+
+- domains: валидность доменов, доля правильной зоны;
+- support_faq: `matched_items`, `relevance_avg`, `relevance_max`, `zero_match_rate`;
+- chat: средняя длина ответа, число пустых ответов;
+- php template: размер результата, наличие PHP/HTML тэгов.
+
 ---
 
 ## 9. Полезные команды Makefile
@@ -286,4 +356,5 @@ make down
 - Сценарий демонстрации: `docs/defense-scenario.md`
 - Методика экспериментов: `docs/experiment-methodology.md`
 - Чек-лист для отчета и защиты: `docs/report-checklist-ru.md`
+- Безопасность и отсутствие утечек: `docs/security-notes-ru.md`
 

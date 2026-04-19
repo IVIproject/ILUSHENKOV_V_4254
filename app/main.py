@@ -248,6 +248,49 @@ def _resolve_model_for_request(db, model_id: str) -> GatewayModel:
     raise HTTPException(status_code=404, detail=f"Unknown model_id: {model_id}")
 
 
+def _resolve_internal_mode_model(
+    db,
+    *,
+    requested_model_id: str | None,
+    mode_name: str,
+) -> GatewayModel:
+    _ensure_catalog_seeded(db)
+    if requested_model_id and requested_model_id.strip():
+        row = _resolve_model_for_request(db, requested_model_id.strip())
+    else:
+        row = (
+            db.query(GatewayModel)
+            .filter(
+                func.lower(GatewayModel.provider) == "ollama",
+                func.lower(GatewayModel.target_model) == settings.ollama_model.strip().lower(),
+                GatewayModel.is_active.is_(True),
+            )
+            .first()
+        )
+        if row is None:
+            # Fallback to any active local model when default target is absent in catalog.
+            row = (
+                db.query(GatewayModel)
+                .filter(
+                    func.lower(GatewayModel.provider) == "ollama",
+                    GatewayModel.is_active.is_(True),
+                )
+                .order_by(GatewayModel.id.asc())
+                .first()
+            )
+    if row is None:
+        raise HTTPException(status_code=404, detail="No active local model configured")
+    if row.provider != "ollama" and not settings.allow_external_in_internal_modes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Mode '{mode_name}' is restricted to local models. "
+                "Set ALLOW_EXTERNAL_IN_INTERNAL_MODES=true to override."
+            ),
+        )
+    return row
+
+
 def _charge_for_model(total_tokens: int, model_row: GatewayModel) -> int:
     return compute_token_charge(total_tokens, _effective_model_price_per_1k(model_row))
 
@@ -1093,9 +1136,15 @@ def generate_domains(payload: DomainSuggestionsRequest, request: Request):
             "domain generation request received",
             extra={"request_id": request.state.request_id},
         )
+        with SessionLocal() as db:
+            model_row = _resolve_internal_mode_model(
+                db,
+                requested_model_id=payload.model_id,
+                mode_name="domains",
+            )
         raw = run_domain_mode(
             client=client,
-            model=settings.ollama_model,
+            model=model_row.target_model,
             business_context=payload.business_context,
             keywords=payload.keywords,
             zone=payload.zone,
@@ -1112,6 +1161,8 @@ def generate_domains(payload: DomainSuggestionsRequest, request: Request):
             zone=payload.zone,
             suggestions=suggestions,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(
             "domain generation failed",
@@ -1200,6 +1251,11 @@ def ask_support_faq(payload: SupportFaqAskRequest):
     try:
         max_items = max(1, min(payload.max_context_items, 20))
         with SessionLocal() as db:
+            model_row = _resolve_internal_mode_model(
+                db,
+                requested_model_id=payload.model_id,
+                mode_name="support_faq",
+            )
             rows = (
                 db.query(SupportFaqEntry)
                 .order_by(SupportFaqEntry.id.desc())
@@ -1217,7 +1273,7 @@ def ask_support_faq(payload: SupportFaqAskRequest):
         zero_match = relevance_max <= 0
         answer = run_support_faq_mode(
             client=client,
-            model=settings.ollama_model,
+            model=model_row.target_model,
             user_question=payload.question,
             faq_pairs=[item.pair for item in selected_pairs],
         )
@@ -1230,7 +1286,17 @@ def ask_support_faq(payload: SupportFaqAskRequest):
             zero_match=zero_match,
             source_mode="support_faq",
         )
-        return SupportFaqAskResponse(answer=answer, matched_items=len(selected_pairs))
+        return SupportFaqAskResponse(
+            answer=answer,
+            matched_items=len(selected_pairs),
+            relevance_avg=float(relevance_avg),
+            relevance_max=float(relevance_max),
+            zero_match=zero_match,
+            model_id=model_row.model_key,
+            provider=model_row.provider,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Support FAQ ask error: {e}")
 
@@ -1240,9 +1306,15 @@ def generate_page_from_template(payload: PageTemplateGenerateRequest):
     try:
         template_path = _resolve_template_path(payload.template_name)
         template_text = template_path.read_text(encoding="utf-8")
+        with SessionLocal() as db:
+            model_row = _resolve_internal_mode_model(
+                db,
+                requested_model_id=payload.model_id,
+                mode_name="php_template",
+            )
         generated_php = generate_hosting_page_from_template(
             client=client,
-            model=settings.ollama_model,
+            model=model_row.target_model,
             template_text=template_text,
             content_prompt=payload.content_prompt,
         )
@@ -1294,9 +1366,18 @@ def run_mode(payload: ModeRunRequest, request: Request):
             prompt = str(data.get("prompt", "")).strip()
             if not prompt:
                 raise HTTPException(status_code=400, detail="payload.prompt is required for chat mode")
-            answer = run_chat_mode(client=client, model=settings.ollama_model, prompt=prompt)
+            with SessionLocal() as db:
+                model_row = _resolve_internal_mode_model(
+                    db,
+                    requested_model_id=payload.model_id,
+                    mode_name="chat",
+                )
+            answer = run_chat_mode(client=client, model=model_row.target_model, prompt=prompt)
             _save_log(prompt=prompt, answer=answer)
-            return ModeRunResponse(mode=mode, result={"text": answer})
+            return ModeRunResponse(
+                mode=mode,
+                result={"text": answer, "model_id": model_row.model_key, "provider": model_row.provider},
+            )
 
         if mode == "domains":
             business_context = str(data.get("business_context", "")).strip()
@@ -1307,9 +1388,15 @@ def run_mode(payload: ModeRunRequest, request: Request):
             keywords = data.get("keywords", [])
             if not isinstance(keywords, list):
                 keywords = []
+            with SessionLocal() as db:
+                model_row = _resolve_internal_mode_model(
+                    db,
+                    requested_model_id=payload.model_id,
+                    mode_name="domains",
+                )
             raw = run_domain_mode(
                 client=client,
-                model=settings.ollama_model,
+                model=model_row.target_model,
                 business_context=business_context,
                 keywords=[str(k) for k in keywords],
                 zone=zone,
@@ -1321,7 +1408,15 @@ def run_mode(payload: ModeRunRequest, request: Request):
                 while len(suggestions) < count:
                     suggestions.append(f"{base[:12]}{len(suggestions)+1}{zone}")
             _save_log(prompt=business_context, answer="\n".join(suggestions))
-            return ModeRunResponse(mode=mode, result={"suggestions": suggestions, "zone": zone})
+            return ModeRunResponse(
+                mode=mode,
+                result={
+                    "suggestions": suggestions,
+                    "zone": zone,
+                    "model_id": model_row.model_key,
+                    "provider": model_row.provider,
+                },
+            )
 
         if mode == "php_page":
             raise HTTPException(
@@ -1339,6 +1434,11 @@ def run_mode(payload: ModeRunRequest, request: Request):
                 raise HTTPException(status_code=400, detail="payload.question is required for support_faq mode")
             safe_context_items = max(1, min(max_context_items, 20))
             with SessionLocal() as db:
+                model_row = _resolve_internal_mode_model(
+                    db,
+                    requested_model_id=payload.model_id,
+                    mode_name="support_faq",
+                )
                 rows = (
                     db.query(SupportFaqEntry)
                     .order_by(SupportFaqEntry.id.desc())
@@ -1356,7 +1456,7 @@ def run_mode(payload: ModeRunRequest, request: Request):
             zero_match = relevance_max <= 0
             answer = run_support_faq_mode(
                 client=client,
-                model=settings.ollama_model,
+                model=model_row.target_model,
                 user_question=question,
                 faq_pairs=[item.pair for item in selected_pairs],
             )
@@ -1371,7 +1471,15 @@ def run_mode(payload: ModeRunRequest, request: Request):
             )
             return ModeRunResponse(
                 mode=mode,
-                result={"answer": answer, "matched_items": len(selected_pairs)},
+                result={
+                    "answer": answer,
+                    "matched_items": len(selected_pairs),
+                    "relevance_avg": float(relevance_avg),
+                    "relevance_max": float(relevance_max),
+                    "zero_match": zero_match,
+                    "model_id": model_row.model_key,
+                    "provider": model_row.provider,
+                },
             )
 
         raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")

@@ -144,7 +144,40 @@ JSON с метриками **по каждой модели**:
 
 ---
 
-## 6) Как оформить таблицы в курсовой
+## 6) Замеры качества по режимам и моделям
+
+Используется скрипт:
+- `scripts/benchmark_modes_quality.py`
+
+Пример запуска:
+
+```bash
+python3 scripts/benchmark_modes_quality.py \
+  --base-url http://127.0.0.1:8080 \
+  --email quality.benchmark@example.com \
+  --password strong-pass-123 \
+  --models "local/qwen2.5-3b,local/llama3.2-3b" \
+  --requests 10 \
+  --warmup 2 \
+  --out docs/results/benchmark-modes-quality.json
+```
+
+Если у вас включен `ADMIN_API_KEY`, добавьте:
+
+```bash
+  --admin-api-key your-admin-key
+```
+
+Что измеряется:
+
+- `chat`: средняя длина ответа, число пустых ответов;
+- `domains`: среднее число валидных доменов и попадание в нужную зону;
+- `support_faq`: `matched_items`, `relevance_avg`, `relevance_max`, `zero_match_rate`;
+- `php_template_file`: размер результата, наличие PHP/HTML тегов.
+
+---
+
+## 7) Как оформить таблицы в курсовой
 
 Рекомендуемые таблицы:
 
@@ -172,7 +205,7 @@ JSON с метриками **по каждой модели**:
 
 ---
 
-## 7) Демо-сценарий на защите (5-7 минут)
+## 8) Демо-сценарий на защите (5-7 минут)
 
 1. Показ `/health`.
 2. Показ регистрации/логина в gateway.
@@ -189,7 +222,7 @@ JSON с метриками **по каждой модели**:
 
 ---
 
-## 8) Типичные проблемы и как объяснить в отчете
+## 9) Типичные проблемы и как объяснить в отчете
 
 1. `model 'llama3.2:3b' not found`
    - причина: API смотрит в Ollama daemon без этой модели;
@@ -205,13 +238,15 @@ JSON с метриками **по каждой модели**:
 
 ---
 
-## 9) Минимальный список файлов для приложения к отчету
+## 10) Минимальный список файлов для приложения к отчету
 
 - `README.md`
 - `docs/architecture.md`
 - `docs/experiment-methodology.md`
 - `docs/defense-scenario.md`
 - `docs/report-checklist-ru.md`
+- `docs/security-notes-ru.md`
 - `docs/results/benchmark-gateway-3models.json`
+- `docs/results/benchmark-modes-quality.json`
 - скриншоты интерфейса и вывода команд
 
