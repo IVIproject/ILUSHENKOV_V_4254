@@ -14,8 +14,6 @@ def load_template(template_name: str) -> str:
 
 
 def build_hosting_template_from_source(source_php: str) -> str:
-    # Minimal deterministic transformation from source page into template placeholders.
-    # Product-related blocks are wrapped into protected markers and should not be modified.
     text = source_php
 
     replacements = {
